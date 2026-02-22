@@ -1,16 +1,36 @@
-import { Hono } from "hono";
+import { Hono } from "hono"
+import { upgradeWebSocket, websocket } from "hono/bun"
+import { newRpcResponse } from "@hono/capnweb"
+import { createClient } from "./opencode"
+import { Api } from "./rpc"
+import { parseArgs } from "util"
 
-const app = new Hono();
+const { values } = parseArgs({
+  args: Bun.argv.slice(2),
+  options: {
+    "opencode-url": { type: "string", default: "http://localhost:4096" },
+    port: { type: "string", default: "3000" },
+  },
+})
 
-app.get("/", (c) => {
-  return c.json({ status: "ok" });
-});
+const opencodeUrl = values["opencode-url"]!
+const port = parseInt(values.port!, 10)
 
-app.get("/health", (c) => {
-  return c.json({ healthy: true });
-});
+const client = createClient(opencodeUrl)
+const app = new Hono()
+
+app.all("/rpc", (c) => {
+  return newRpcResponse(c, new Api(client), { upgradeWebSocket })
+})
+
+app.get("/health", async (c) => {
+  return c.json({ healthy: true, opencodeUrl })
+})
+
+console.log(`Server starting on port ${port} (opencode: ${opencodeUrl})`)
 
 export default {
-  port: process.env.PORT || 3000,
+  port,
   fetch: app.fetch,
-};
+  websocket,
+}
