@@ -1,5 +1,7 @@
-import { FIXTURE_SESSIONS, type Session } from '../__fixtures__/sessions'
-import { FIXTURE_PROJECTS } from '../__fixtures__/projects'
+import { useMemo } from 'react'
+import { useLiveQuery } from '@tanstack/react-db'
+import { sessionCollection } from '../db/collections'
+import { useProjects } from './useProjects'
 
 const DAY = 24 * 60 * 60_000
 
@@ -29,39 +31,45 @@ function formatRelativeTime(timestamp: number): string {
   return `${days} days ago`
 }
 
-function toSidebarSession(session: Session): SidebarSession {
-  const project = FIXTURE_PROJECTS.find((p) => p.id === session.projectId)
-  return {
-    id: session.id,
-    name: session.name,
-    projectName: project?.name ?? 'unknown',
-    status: session.status,
-    relativeTime: formatRelativeTime(session.updatedAt),
-    updatedAt: session.updatedAt,
-  }
-}
+export function useSidebarSessions(
+  projectId: string | undefined,
+  searchQuery: string
+): { data: GroupedSessions; isLoading: boolean } {
+  const { data: sessions, isLoading } = useLiveQuery(sessionCollection)
+  const { data: projects } = useProjects()
 
-// TODO: Replace fixture with TanStack DB live query
-// return useLiveQuery((q) =>
-//   q.from({ session: sessionCollection })
-//     .orderBy(({ session }) => desc(session.updatedAt))
-// )
-export function useSidebarSessions(searchQuery: string): { data: GroupedSessions } {
-  const allSessions = FIXTURE_SESSIONS
-    .map(toSidebarSession)
-    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const grouped = useMemo(() => {
+    const projectMap = new Map(projects.map((p) => [p.id, p.name]))
 
-  const filtered = searchQuery
-    ? allSessions.filter(
-        (s) =>
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.projectName.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : allSessions
+    const mapped = (sessions ?? [])
+      .filter((s) => !projectId || s.projectId === projectId)
+      .map((s): SidebarSession => {
+        const isActive = Date.now() - s.updatedAt < 5 * 60_000
+        return {
+          id: s.id,
+          name: s.title || 'Untitled',
+          projectName: projectMap.get(s.projectId) ?? 'unknown',
+          status: isActive ? 'active' : 'idle',
+          relativeTime: formatRelativeTime(s.updatedAt),
+          updatedAt: s.updatedAt,
+        }
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
 
-  const cutoff = Date.now() - DAY
-  const recent = filtered.filter((s) => s.updatedAt >= cutoff)
-  const earlier = filtered.filter((s) => s.updatedAt < cutoff)
+    const filtered = searchQuery
+      ? mapped.filter(
+          (s) =>
+            s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            s.projectName.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : mapped
 
-  return { data: { recent, earlier } }
+    const cutoff = Date.now() - DAY
+    return {
+      recent: filtered.filter((s) => s.updatedAt >= cutoff),
+      earlier: filtered.filter((s) => s.updatedAt < cutoff),
+    }
+  }, [sessions, projects, projectId, searchQuery])
+
+  return { data: grouped, isLoading }
 }

@@ -1,6 +1,6 @@
 import React from 'react'
 import { View, Text, Pressable } from 'react-native'
-import type { Project } from '../__fixtures__/projects'
+import type { Project } from '../../server/src/types'
 
 // Color palette for project avatars - cycles through these
 const AVATAR_COLORS = ['#22D3EE', '#475569', '#475569', '#8B5CF6', '#EC4899', '#475569']

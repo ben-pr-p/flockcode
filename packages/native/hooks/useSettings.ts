@@ -1,35 +1,22 @@
 import { useState } from 'react'
+import { useAtom } from 'jotai'
+import {
+  serverUrlAtom,
+  handsFreeAutoRecordAtom,
+  notificationSoundAtom,
+} from '../state/settings'
 import {
   FIXTURE_SETTINGS,
   NOTIFICATION_SOUND_OPTIONS,
-  type NotificationSound,
   type ConnectionInfo,
 } from '../__fixtures__/settings'
 
-// TODO: Replace with real Jotai atom reads/writes
-// import { useAtom } from 'jotai'
-// import { serverUrlAtom, handsFreeAutoRecordAtom, notificationSoundAtom } from '../state/settings'
-// import { connectionStatusAtom, serverLatencyAtom } from '../state/connectivity'
-//
-// export function useSettings() {
-//   const [serverUrl, setServerUrl] = useAtom(serverUrlAtom)
-//   const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useAtom(handsFreeAutoRecordAtom)
-//   const [notificationSound, setNotificationSound] = useAtom(notificationSoundAtom)
-//   const connectionStatus = useAtomValue(connectionStatusAtom)
-//   const serverLatency = useAtomValue(serverLatencyAtom)
-//   ...
-// }
-
 export function useSettings() {
-  const [serverUrl, setServerUrl] = useState(FIXTURE_SETTINGS.serverUrl)
-  const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useState(
-    FIXTURE_SETTINGS.handsFreeAutoRecord
-  )
-  const [notificationSound, setNotificationSound] = useState<NotificationSound>(
-    FIXTURE_SETTINGS.notificationSound
-  )
+  const [serverUrl, setServerUrl] = useAtom(serverUrlAtom)
+  const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useAtom(handsFreeAutoRecordAtom)
+  const [notificationSound, setNotificationSound] = useAtom(notificationSoundAtom)
 
-  // TODO: Replace with real connection monitoring from Jotai atoms
+  // TODO: Replace with real connection monitoring
   const connection: ConnectionInfo = FIXTURE_SETTINGS.connection
 
   return {

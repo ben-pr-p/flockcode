@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react'
 import { View, Text, Pressable, Animated, useWindowDimensions } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { usePathname, useLocalSearchParams } from 'expo-router'
+import { usePathname, useLocalSearchParams, useRouter } from 'expo-router'
 
 import './global.css'
 import { SessionScreen } from './components/SessionScreen'
@@ -24,6 +24,9 @@ const ANIMATION_DURATION = 280
 export default function App() {
   const { isTabletLandscape, width: screenWidth } = useLayout()
   const sidebarWidth = screenWidth * 0.85
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>()
 
   const sessionId = 'session-1'
   const { data: session } = useSession(sessionId)
@@ -40,14 +43,14 @@ export default function App() {
   const leftSlideAnim = useRef(new Animated.Value(-sidebarWidth)).current
   const leftBackdropAnim = useRef(new Animated.Value(0)).current
   const [sessionSearchQuery, setSessionSearchQuery] = useState('')
-  const { data: sidebarSessions } = useSidebarSessions(sessionSearchQuery)
+  const { data: sidebarSessions } = useSidebarSessions(params.projectId, sessionSearchQuery)
 
   // Right sidebar (projects)
   const [rightSidebarVisible, setRightSidebarVisible] = useState(false)
   const rightSlideAnim = useRef(new Animated.Value(sidebarWidth)).current
   const rightBackdropAnim = useRef(new Animated.Value(0)).current
   const [projectSearchQuery, setProjectSearchQuery] = useState('')
-  const { data: projects } = useProjects()
+  const { data: projects, isLoading: projectsLoading, error: projectsError, refetch: refetchProjects } = useProjects()
   const musicPlayer = useMusicPlayer()
 
   const openLeftSidebar = useCallback(() => {
@@ -125,8 +128,10 @@ export default function App() {
     setSettingsVisible(false)
   }, [])
 
-  const pathname = usePathname()
-  const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>()
+  const handleSelectProject = useCallback((projectId: string) => {
+    router.push(`/projects/${projectId}`)
+    closeRightSidebar()
+  }, [router, closeRightSidebar])
 
   if (!session) return null
 
@@ -229,14 +234,17 @@ export default function App() {
             >
               <ProjectsSidebar
                 projects={filteredProjects}
-                selectedProjectId="proj-1"
+                selectedProjectId={params.projectId ?? null}
                 searchQuery={projectSearchQuery}
+                isLoading={projectsLoading}
+                error={projectsError}
                 onSearchChange={setProjectSearchQuery}
                 onClose={closeRightSidebar}
                 onAddProject={() => {}}
-                onSelectProject={() => {}}
+                onSelectProject={handleSelectProject}
                 onNewSession={() => {}}
                 onOverflow={() => {}}
+                onRetry={refetchProjects}
                 musicPlayer={musicPlayer}
               />
             </Animated.View>

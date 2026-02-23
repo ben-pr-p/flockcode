@@ -1,20 +1,23 @@
 import React from 'react'
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native'
+import { ActivityIndicator, View, Text, Pressable, ScrollView, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ProjectCard } from './ProjectCard'
 import { MusicPlayerBar } from './MusicPlayerBar'
-import type { Project } from '../__fixtures__/projects'
+import type { Project } from '../../server/src/types'
 
 interface ProjectsSidebarProps {
   projects: Project[]
   selectedProjectId: string | null
   searchQuery: string
+  isLoading?: boolean
+  error?: Error | null
   onSearchChange: (query: string) => void
   onClose: () => void
   onAddProject: () => void
   onSelectProject: (id: string) => void
   onNewSession: (projectId: string) => void
   onOverflow: (projectId: string) => void
+  onRetry?: () => void
   musicPlayer: {
     track: { name: string; artist: string; albumArtUri: string; durationMs: number } | null
     isPlaying: boolean
@@ -32,12 +35,15 @@ export function ProjectsSidebar({
   projects,
   selectedProjectId,
   searchQuery,
+  isLoading,
+  error,
   onSearchChange,
   onClose,
   onAddProject,
   onSelectProject,
   onNewSession,
   onOverflow,
+  onRetry,
   musicPlayer,
 }: ProjectsSidebarProps) {
   const insets = useSafeAreaInsets()
@@ -91,23 +97,71 @@ export function ProjectsSidebar({
       )}
 
       {/* Projects list */}
-      <ScrollView
-        className="flex-1"
-        contentContainerStyle={{ padding: 16, gap: 8 }}
-        showsVerticalScrollIndicator={false}
-      >
-        {filtered.map((project, index) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            index={index}
-            isSelected={project.id === selectedProjectId}
-            onPress={onSelectProject}
-            onNewSession={onNewSession}
-            onOverflow={onOverflow}
-          />
-        ))}
-      </ScrollView>
+      {isLoading ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#94A3B8" size="small" />
+          <Text className="text-[#475569] text-sm mt-3">Loading projects...</Text>
+        </View>
+      ) : error ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <View className="w-10 h-10 rounded-full bg-red-500/10 items-center justify-center mb-3">
+            <Text className="text-red-400 text-lg">!</Text>
+          </View>
+          <Text className="text-red-400 text-sm font-medium text-center">
+            Failed to load projects
+          </Text>
+          <Text className="text-[#475569] text-xs text-center mt-1">
+            {error.message}
+          </Text>
+          {onRetry && (
+            <Pressable
+              onPress={onRetry}
+              className="mt-4 px-4 h-8 rounded-lg bg-[#1E293B] items-center justify-center"
+            >
+              <Text className="text-[#94A3B8] text-sm">Retry</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : filtered.length === 0 && searchQuery ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-[#475569] text-sm text-center">
+            No projects matching "{searchQuery}"
+          </Text>
+        </View>
+      ) : filtered.length === 0 ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-white text-sm font-medium text-center">
+            No projects yet
+          </Text>
+          <Text className="text-[#475569] text-xs text-center mt-1">
+            Add a project to get started
+          </Text>
+          <Pressable
+            onPress={onAddProject}
+            className="mt-4 px-4 h-8 rounded-lg bg-[#1E293B] items-center justify-center"
+          >
+            <Text className="text-[#94A3B8] text-sm">+ New Project</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <ScrollView
+          className="flex-1"
+          contentContainerStyle={{ padding: 16, gap: 8 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {filtered.map((project, index) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              index={index}
+              isSelected={project.id === selectedProjectId}
+              onPress={onSelectProject}
+              onNewSession={onNewSession}
+              onOverflow={onOverflow}
+            />
+          ))}
+        </ScrollView>
+      )}
 
       {/* Music player */}
       <MusicPlayerBar {...musicPlayer} />
