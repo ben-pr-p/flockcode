@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react'
 import { View, Text, Pressable, Animated, useWindowDimensions } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { usePathname, useLocalSearchParams, useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 
 import './global.css'
 import { SessionScreen } from './components/SessionScreen'
@@ -25,7 +25,6 @@ export default function App() {
   const { isTabletLandscape, width: screenWidth } = useLayout()
   const sidebarWidth = screenWidth * 0.85
   const router = useRouter()
-  const pathname = usePathname()
   const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>()
 
   const sessionId = 'session-1'
@@ -133,6 +132,14 @@ export default function App() {
     closeRightSidebar()
   }, [router, closeRightSidebar])
 
+  const handleSelectSession = useCallback((sessionId: string) => {
+    const session = sidebarSessions.recent.find((s) => s.id === sessionId)
+      ?? sidebarSessions.earlier.find((s) => s.id === sessionId)
+    if (!session) return
+    router.push(`/projects/${session.projectId}/sessions/${sessionId}`)
+    closeLeftSidebar()
+  }, [router, closeLeftSidebar, sidebarSessions])
+
   if (!session) return null
 
   const filteredProjects = projectSearchQuery
@@ -144,11 +151,6 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <View className="flex-1">
-        <View className="bg-yellow-500 px-3 py-1">
-          <Text className="text-black text-xs font-mono">
-            path: {pathname} | projectId: {params.projectId ?? '—'} | sessionId: {params.sessionId ?? '—'}
-          </Text>
-        </View>
         {isTabletLandscape ? (
           // iPad landscape: split-pane layout
           <SplitLayout
@@ -204,12 +206,12 @@ export default function App() {
             >
               <SessionsSidebar
                 sessions={sidebarSessions}
-                selectedSessionId={sessionId}
+                selectedSessionId={params.sessionId ?? null}
                 searchQuery={sessionSearchQuery}
                 onSearchChange={setSessionSearchQuery}
                 onClose={closeLeftSidebar}
                 onNewSession={() => {}}
-                onSelectSession={() => {}}
+                onSelectSession={handleSelectSession}
                 onOverflowSession={() => {}}
                 onSettingsPress={openSettings}
                 onMicPress={() => {}}

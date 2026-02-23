@@ -7,6 +7,7 @@ const DAY = 24 * 60 * 60_000
 
 export interface SidebarSession {
   id: string
+  projectId: string
   name: string
   projectName: string
   status: 'active' | 'idle'
@@ -47,6 +48,7 @@ export function useSidebarSessions(
         const isActive = Date.now() - s.updatedAt < 5 * 60_000
         return {
           id: s.id,
+          projectId: s.projectId,
           name: s.title || 'Untitled',
           projectName: projectMap.get(s.projectId) ?? 'unknown',
           status: isActive ? 'active' : 'idle',
