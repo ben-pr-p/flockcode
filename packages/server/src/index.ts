@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { upgradeWebSocket, websocket } from "hono/bun"
 import { newRpcResponse } from "@hono/capnweb"
-import { createClient } from "./opencode"
+import { createClient, Opencode } from "./opencode"
 import { Api } from "./rpc"
 import { parseArgs } from "util"
 
@@ -17,10 +17,14 @@ const opencodeUrl = values["opencode-url"]!
 const port = parseInt(values.port!, 10)
 
 const client = createClient(opencodeUrl)
+const opencode = new Opencode(opencodeUrl)
+opencode.spawnListener().catch((err) => {
+  console.error("Failed to start opencode event listener:", err)
+})
 const app = new Hono()
 
 app.all("/rpc", (c) => {
-  return newRpcResponse(c, new Api(client), { upgradeWebSocket })
+  return newRpcResponse(c, new Api(client, opencode), { upgradeWebSocket })
 })
 
 app.get("/health", async (c) => {
