@@ -94,7 +94,7 @@ export function ChangesView({ sessionId, changes }: ChangesViewProps) {
         </View>
         {/* Diff fills remaining space, scrolls internally */}
         <View className="flex-1">
-          <DiffWebView sessionId={sessionId} file={expandedChange.path} scrollable />
+          <DiffWebView sessionId={sessionId} activeFile={expandedChange.path} />
         </View>
       </View>
     )

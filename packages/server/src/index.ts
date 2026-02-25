@@ -50,6 +50,24 @@ app.get("/api/diff", async (c) => {
   return c.json({ file: match.file, before: match.before, after: match.after })
 })
 
+// API endpoint: returns all file diffs for a session
+app.get("/api/diffs", async (c) => {
+  const sessionId = c.req.query("session")
+  if (!sessionId) {
+    return c.json({ error: "Missing session query param" }, 400)
+  }
+  const res = await client.session.diff({ path: { id: sessionId } })
+  if (res.error) {
+    return c.json({ error: "Failed to fetch diffs" }, 500)
+  }
+  const diffs = (res.data ?? []).map((d: any) => ({
+    file: d.file,
+    before: d.before,
+    after: d.after,
+  }))
+  return c.json(diffs)
+})
+
 console.log(`Server starting on port ${port} (opencode: ${opencodeUrl})`)
 
 export default {
