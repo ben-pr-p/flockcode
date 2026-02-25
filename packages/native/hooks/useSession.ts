@@ -1,12 +1,52 @@
-import { FIXTURE_SESSIONS, type Session } from '../__fixtures__/sessions'
+import { useAtomValue } from 'jotai'
+import { apiAtom, type RpcApi } from '../lib/api'
+import { useRpcTarget } from './useRpcTarget'
 
-// TODO: Replace fixture with TanStack DB live query
-// return useLiveQuery((q) =>
-//   q.from({ session: sessionCollection })
-//     .where(({ session }) => eq(session.id, sessionId))
-//     .first()
-// )
-export function useSession(sessionId: string): { data: Session | null } {
-  const session = FIXTURE_SESSIONS.find((s) => s.id === sessionId) ?? null
-  return { data: session }
+// Re-export the UI Session type that components expect
+export interface Session {
+  id: string
+  projectId: string
+  name: string
+  branchName: string | null
+  status: 'active' | 'idle'
+  createdAt: number
+  updatedAt: number
+}
+
+// Wrapper RPC target that maps the raw server state to the UI Session shape
+class SessionStateTarget {
+  #handle: ReturnType<RpcApi['getSession']>
+
+  constructor(handle: ReturnType<RpcApi['getSession']>) {
+    this.#handle = handle
+  }
+
+  async getState(): Promise<Session> {
+    const info = await this.#handle.info()
+    const isActive = Date.now() - info.time.updated < 5 * 60_000
+    return {
+      id: info.id,
+      projectId: info.projectID,
+      name: info.title || 'Untitled',
+      branchName: null,
+      status: isActive ? 'active' : 'idle',
+      createdAt: info.time.created,
+      updatedAt: info.time.updated,
+    }
+  }
+}
+
+export function useSession(sessionId: string | undefined): { data: Session | null; isLoading: boolean } {
+  const api = useAtomValue(apiAtom)
+
+  const { data, isLoading } = useRpcTarget(
+    () => new SessionStateTarget(api.getSession(sessionId!)),
+    [api, sessionId],
+  )
+
+  if (!sessionId) {
+    return { data: null, isLoading: false }
+  }
+
+  return { data, isLoading }
 }

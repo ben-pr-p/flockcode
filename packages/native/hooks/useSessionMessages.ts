@@ -1,14 +1,109 @@
-import { FIXTURE_MESSAGES, type Message } from '../__fixtures__/messages'
+import { useAtomValue } from 'jotai'
+import { apiAtom, type RpcApi } from '../lib/api'
+import { useRpcTarget } from './useRpcTarget'
+import type { Message as ServerMessage } from '../../server/src/types'
 
-// TODO: Replace fixture with TanStack DB live query
-// return useLiveQuery((q) =>
-//   q.from({ message: messageCollection })
-//     .where(({ message }) => eq(message.sessionId, sessionId))
-//     .orderBy(({ message }) => asc(message.createdAt))
-// )
-export function useSessionMessages(sessionId: string): { data: Message[] } {
-  const messages = FIXTURE_MESSAGES
-    .filter((m) => m.sessionId === sessionId)
-    .sort((a, b) => a.createdAt - b.createdAt)
-  return { data: messages }
+// UI Message type that components expect (flat structure for rendering)
+export interface Message {
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant'
+  type: 'text' | 'voice' | 'tool_call' | 'tool_output' | 'status'
+  content: string
+  audioUri: string | null
+  transcription: string | null
+  toolName: string | null
+  toolMeta: Record<string, unknown> | null
+  syncStatus: 'synced' | 'pending' | 'sending' | 'failed'
+  createdAt: number
+}
+
+function flattenMessage(msg: ServerMessage): Message[] {
+  const messages: Message[] = []
+
+  for (const part of msg.parts) {
+    switch (part.type) {
+      case 'text':
+        messages.push({
+          id: part.id,
+          sessionId: msg.sessionId,
+          role: msg.role,
+          type: 'text',
+          content: part.text,
+          audioUri: null,
+          transcription: null,
+          toolName: null,
+          toolMeta: null,
+          syncStatus: 'synced',
+          createdAt: msg.createdAt,
+        })
+        break
+      case 'tool':
+        messages.push({
+          id: part.id,
+          sessionId: msg.sessionId,
+          role: msg.role,
+          type: 'tool_call',
+          content: part.state.title || part.tool,
+          audioUri: null,
+          transcription: null,
+          toolName: part.tool,
+          toolMeta: part.state as Record<string, unknown>,
+          syncStatus: 'synced',
+          createdAt: msg.createdAt,
+        })
+        break
+      // step-start/step-finish/reasoning are internal, skip for now
+    }
+  }
+
+  // If a message had no renderable parts, emit a text placeholder
+  if (messages.length === 0 && msg.parts.length > 0) {
+    messages.push({
+      id: msg.id,
+      sessionId: msg.sessionId,
+      role: msg.role,
+      type: 'text',
+      content: '',
+      audioUri: null,
+      transcription: null,
+      toolName: null,
+      toolMeta: null,
+      syncStatus: 'synced',
+      createdAt: msg.createdAt,
+    })
+  }
+
+  return messages
+}
+
+// Wrapper that fetches messages via the session handle and flattens them
+class MessageListTarget {
+  #handle: ReturnType<RpcApi['getSession']>
+
+  constructor(handle: ReturnType<RpcApi['getSession']>) {
+    this.#handle = handle
+  }
+
+  async getState(): Promise<Message[]> {
+    const serverMessages = await this.#handle.messages()
+    return serverMessages
+      .sort((a: ServerMessage, b: ServerMessage) => a.createdAt - b.createdAt)
+      .flatMap(flattenMessage)
+  }
+}
+
+export function useSessionMessages(sessionId: string | undefined): { data: Message[]; isLoading: boolean } {
+  const api = useAtomValue(apiAtom)
+
+  const { data, isLoading } = useRpcTarget(
+    () => new MessageListTarget(api.getSession(sessionId!)),
+    [api, sessionId],
+  )
+
+  if (!sessionId) {
+    return { data: [], isLoading: false }
+  }
+
+  return { data: data ?? [], isLoading }
 }

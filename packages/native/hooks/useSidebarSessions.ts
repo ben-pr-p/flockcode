@@ -1,7 +1,9 @@
 import { useMemo } from 'react'
-import { useLiveQuery } from '@tanstack/react-db'
-import { sessionCollection } from '../db/collections'
+import { useAtomValue } from 'jotai'
+import { apiAtom } from '../lib/api'
+import { useRpcTarget } from './useRpcTarget'
 import { useProjects } from './useProjects'
+import type { Session } from '../../server/src/types'
 
 const DAY = 24 * 60 * 60_000
 
@@ -32,28 +34,38 @@ function formatRelativeTime(timestamp: number): string {
   return `${days} days ago`
 }
 
+function projectName(worktree: string): string {
+  if (worktree === '/') return 'global'
+  return worktree.split('/').pop() || worktree
+}
+
 export function useSidebarSessions(
   projectId: string | undefined,
   searchQuery: string
 ): { data: GroupedSessions; isLoading: boolean } {
-  const { data: sessions, isLoading } = useLiveQuery(sessionCollection)
+  const api = useAtomValue(apiAtom)
   const { data: projects } = useProjects()
 
+  const { data: sessions, isLoading } = useRpcTarget(
+    () => api.sessionList(),
+    [api],
+  )
+
   const grouped = useMemo(() => {
-    const projectMap = new Map(projects.map((p) => [p.id, p.name]))
+    const projectMap = new Map(projects.map((p) => [p.id, projectName(p.worktree)]))
 
     const mapped = (sessions ?? [])
-      .filter((s) => !projectId || s.projectId === projectId)
+      .filter((s) => !projectId || s.projectID === projectId)
       .map((s): SidebarSession => {
-        const isActive = Date.now() - s.updatedAt < 5 * 60_000
+        const isActive = Date.now() - s.time.updated < 5 * 60_000
         return {
           id: s.id,
-          projectId: s.projectId,
+          projectId: s.projectID,
           name: s.title || 'Untitled',
-          projectName: projectMap.get(s.projectId) ?? 'unknown',
+          projectName: projectMap.get(s.projectID) ?? 'unknown',
           status: isActive ? 'active' : 'idle',
-          relativeTime: formatRelativeTime(s.updatedAt),
-          updatedAt: s.updatedAt,
+          relativeTime: formatRelativeTime(s.time.updated),
+          updatedAt: s.time.updated,
         }
       })
       .sort((a, b) => b.updatedAt - a.updatedAt)
