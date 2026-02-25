@@ -1,20 +1,15 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react'
-import { View, Text, Pressable, Animated, useWindowDimensions } from 'react-native'
+import React, { useState, useRef, useCallback } from 'react'
+import { View, Text, Pressable, Animated } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 
 import './global.css'
-import { SessionScreen } from './components/SessionScreen'
-import { SplitLayout } from './components/SplitLayout'
+import { SessionContent } from './components/SessionContent'
 import { SessionsSidebar } from './components/SessionsSidebar'
 import { ProjectsSidebar } from './components/ProjectsSidebar'
 import { SettingsScreen } from './components/SettingsScreen'
-import { useSession } from './hooks/useSession'
-import { useSessionMessages } from './hooks/useSessionMessages'
-import { useChanges } from './hooks/useChanges'
-import { useSidebarSessions } from './hooks/useSidebarSessions'
-import { useProjects } from './hooks/useProjects'
+import { EmptySession } from './components/EmptySession'
 import { useMusicPlayer } from './hooks/useMusicPlayer'
 import { useSettings } from './hooks/useSettings'
 import { useLayout } from './hooks/useLayout'
@@ -27,11 +22,7 @@ export default function App() {
   const router = useRouter()
   const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>()
 
-  const sessionId = 'session-1'
-  const { data: session } = useSession(sessionId)
-  const { data: messages } = useSessionMessages(sessionId)
-  const { data: changes } = useChanges(sessionId)
-  const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session')
+  const sessionId = params.sessionId
 
   // Settings (only used for phone layout; iPad handles settings in left panel)
   const [settingsVisible, setSettingsVisible] = useState(false)
@@ -41,15 +32,11 @@ export default function App() {
   const [leftSidebarVisible, setLeftSidebarVisible] = useState(false)
   const leftSlideAnim = useRef(new Animated.Value(-sidebarWidth)).current
   const leftBackdropAnim = useRef(new Animated.Value(0)).current
-  const [sessionSearchQuery, setSessionSearchQuery] = useState('')
-  const { data: sidebarSessions } = useSidebarSessions(params.projectId, sessionSearchQuery)
 
   // Right sidebar (projects)
   const [rightSidebarVisible, setRightSidebarVisible] = useState(false)
   const rightSlideAnim = useRef(new Animated.Value(sidebarWidth)).current
   const rightBackdropAnim = useRef(new Animated.Value(0)).current
-  const [projectSearchQuery, setProjectSearchQuery] = useState('')
-  const { data: projects, isLoading: projectsLoading, error: projectsError, refetch: refetchProjects } = useProjects()
   const musicPlayer = useMusicPlayer()
 
   const openLeftSidebar = useCallback(() => {
@@ -132,38 +119,15 @@ export default function App() {
     closeRightSidebar()
   }, [router, closeRightSidebar])
 
-  const handleSelectSession = useCallback((sessionId: string) => {
-    const session = sidebarSessions.recent.find((s) => s.id === sessionId)
-      ?? sidebarSessions.earlier.find((s) => s.id === sessionId)
-    if (!session) return
-    router.push(`/projects/${session.projectId}/sessions/${sessionId}`)
+  const handleSelectSession = useCallback((sessionId: string, projectId: string) => {
+    router.push(`/projects/${projectId}/sessions/${sessionId}`)
     closeLeftSidebar()
-  }, [router, closeLeftSidebar, sidebarSessions])
-
-  if (!session) return null
-
-  const filteredProjects = projectSearchQuery
-    ? projects.filter((p) =>
-        p.name.toLowerCase().includes(projectSearchQuery.toLowerCase())
-      )
-    : projects
+  }, [router, closeLeftSidebar])
 
   return (
     <SafeAreaProvider>
       <View className="flex-1">
-        {isTabletLandscape ? (
-          // iPad landscape: split-pane layout
-          <SplitLayout
-            session={session}
-            messages={messages}
-            changes={changes}
-            onMenuPress={openLeftSidebar}
-            onProjectsPress={openRightSidebar}
-            onToolCallPress={() => {}}
-            settings={settings}
-          />
-        ) : settingsVisible ? (
-          // Phone/portrait: full-screen settings
+        {settingsVisible ? (
           <SettingsScreen
             serverUrl={settings.serverUrl}
             onServerUrlChange={settings.setServerUrl}
@@ -177,17 +141,18 @@ export default function App() {
             defaultModel={settings.defaultModel}
             onBack={closeSettings}
           />
-        ) : (
-          // Phone/portrait: single-column session
-          <SessionScreen
-            session={session}
-            messages={messages}
-            changes={changes}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
+        ) : sessionId ? (
+          <SessionContent
+            sessionId={sessionId}
+            isTabletLandscape={isTabletLandscape}
             onMenuPress={openLeftSidebar}
             onProjectsPress={openRightSidebar}
-            onToolCallPress={() => {}}
+            settings={settings}
+          />
+        ) : (
+          <EmptySession
+            onMenuPress={openLeftSidebar}
+            onProjectsPress={openRightSidebar}
           />
         )}
 
@@ -205,10 +170,8 @@ export default function App() {
               style={{ width: sidebarWidth, transform: [{ translateX: leftSlideAnim }] }}
             >
               <SessionsSidebar
-                sessions={sidebarSessions}
+                projectId={params.projectId}
                 selectedSessionId={params.sessionId ?? null}
-                searchQuery={sessionSearchQuery}
-                onSearchChange={setSessionSearchQuery}
                 onClose={closeLeftSidebar}
                 onNewSession={() => {}}
                 onSelectSession={handleSelectSession}
@@ -235,18 +198,12 @@ export default function App() {
               style={{ width: sidebarWidth, transform: [{ translateX: rightSlideAnim }] }}
             >
               <ProjectsSidebar
-                projects={filteredProjects}
                 selectedProjectId={params.projectId ?? null}
-                searchQuery={projectSearchQuery}
-                isLoading={projectsLoading}
-                error={projectsError}
-                onSearchChange={setProjectSearchQuery}
                 onClose={closeRightSidebar}
                 onAddProject={() => {}}
                 onSelectProject={handleSelectProject}
                 onNewSession={() => {}}
                 onOverflow={() => {}}
-                onRetry={refetchProjects}
                 musicPlayer={musicPlayer}
               />
             </Animated.View>
