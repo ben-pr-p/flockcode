@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo, useRef } from 'react'
 import { View, Text } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAtomValue } from 'jotai'
@@ -11,6 +11,8 @@ import { useSession } from '../hooks/useSession'
 import { useSessionMessages } from '../hooks/useSessionMessages'
 import { useChanges } from '../hooks/useChanges'
 import { apiAtom } from '../lib/api'
+import { useAudioRecorder } from '../hooks/useAudioRecorder'
+import type { Message } from '../hooks/useSessionMessages'
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings'
 
 interface SessionContentProps {
@@ -79,10 +81,35 @@ function SessionDataLoader({
   settings: SessionContentProps['settings']
 }) {
   const api = useAtomValue(apiAtom)
-  const { data: messages } = useSessionMessages(sessionId)
+  const { data: serverMessages } = useSessionMessages(sessionId)
   const { data: changes } = useChanges(sessionId)
   const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session')
   const [isSending, setIsSending] = useState(false)
+  const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([])
+  const voiceIdCounter = useRef(0)
+
+  // Merge server messages with optimistic voice messages, removing optimistic
+  // ones once the server has caught up (new user message appeared)
+  const messages = useMemo(() => {
+    if (pendingVoiceMessages.length === 0) return serverMessages
+
+    // Find the latest server user message timestamp
+    const latestServerUserMsg = serverMessages
+      .filter((m) => m.role === 'user')
+      .reduce((latest, m) => Math.max(latest, m.createdAt), 0)
+
+    // Keep only pending messages that are newer than the latest server user message
+    const stillPending = pendingVoiceMessages.filter(
+      (m) => m.createdAt > latestServerUserMsg,
+    )
+
+    // Clean up stale pending messages
+    if (stillPending.length !== pendingVoiceMessages.length) {
+      setPendingVoiceMessages(stillPending)
+    }
+
+    return [...serverMessages, ...stillPending]
+  }, [serverMessages, pendingVoiceMessages])
 
   const handleSend = useCallback(async (text: string) => {
     setIsSending(true)
@@ -96,6 +123,33 @@ function SessionDataLoader({
     }
   }, [api, sessionId])
 
+  const handleSendAudio = useCallback((base64: string, mimeType: string) => {
+    // Add an optimistic voice message immediately
+    const optimisticId = `voice-pending-${++voiceIdCounter.current}`
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      sessionId,
+      role: 'user',
+      type: 'voice',
+      content: 'Transcribing...',
+      audioUri: null,
+      transcription: null,
+      toolName: null,
+      toolMeta: null,
+      syncStatus: 'sending',
+      createdAt: Date.now(),
+    }
+    setPendingVoiceMessages((prev) => [...prev, optimisticMsg])
+
+    // Fire the server call in the background — don't block the UI
+    const handle = api.getSession(sessionId)
+    handle.prompt([{ type: 'audio', audioData: base64, mimeType }]).catch((err) => {
+      console.error('[SessionContent] audio prompt failed:', err)
+    })
+  }, [api, sessionId])
+
+  const audioRecorder = useAudioRecorder({ onSendAudio: handleSendAudio })
+
   if (isTabletLandscape) {
     return (
       <SplitLayout
@@ -108,6 +162,7 @@ function SessionDataLoader({
         onToolCallPress={() => {}}
         onSend={handleSend}
         isSending={isSending}
+        audioRecorder={audioRecorder}
         settings={settings}
       />
     )
@@ -126,6 +181,7 @@ function SessionDataLoader({
       onToolCallPress={() => {}}
       onSend={handleSend}
       isSending={isSending}
+      audioRecorder={audioRecorder}
     />
   )
 }
@@ -157,10 +213,11 @@ function SessionLoading({
         textValue={textValue}
         onTextChange={setTextValue}
         onSend={() => {}}
-        onMicPress={() => {}}
+        onMicPressIn={() => {}}
+        onMicPressOut={() => {}}
         onAttachPress={() => {}}
         onStopPress={() => {}}
-        micHint="hold to record · tap for hands-free"
+        recordingState="idle"
         modelName="Sonnet"
         providerName="Build"
       />

@@ -33,10 +33,11 @@ export function EmptySession({ onMenuPress, onProjectsPress }: EmptySessionProps
         textValue={textValue}
         onTextChange={setTextValue}
         onSend={() => {}}
-        onMicPress={() => {}}
+        onMicPressIn={() => {}}
+        onMicPressOut={() => {}}
         onAttachPress={() => {}}
         onStopPress={() => {}}
-        micHint="hold to record · tap for hands-free"
+        recordingState="idle"
         modelName="Sonnet"
         providerName="Build"
       />

@@ -9,6 +9,7 @@ import { VoiceInputArea } from './VoiceInputArea'
 import type { Session } from '../hooks/useSession'
 import type { Message } from '../hooks/useSessionMessages'
 import type { ChangedFile } from '../hooks/useChanges'
+import type { RecordingState } from '../hooks/useAudioRecorder'
 
 interface SessionScreenProps {
   sessionId: string
@@ -22,6 +23,12 @@ interface SessionScreenProps {
   onToolCallPress?: (messageId: string) => void
   onSend: (text: string) => void
   isSending?: boolean
+  audioRecorder: {
+    recordingState: RecordingState
+    startRecording: () => void
+    stopRecording: () => void
+    cancelRecording: () => void
+  }
   emptyMessage?: string
 }
 
@@ -37,6 +44,7 @@ export function SessionScreen({
   onToolCallPress,
   onSend,
   isSending,
+  audioRecorder,
   emptyMessage,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
@@ -45,7 +53,7 @@ export function SessionScreen({
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
       <SessionHeader
-        projectName={session.name.includes('/') ? session.name : 'opencode-rn'}
+        projectName={session.directory ? session.directory.split('/').pop() || session.directory : ''}
         branchName={session.name}
         relativeTime={formatRelativeTime(session.updatedAt)}
         onMenuPress={onMenuPress}
@@ -74,10 +82,11 @@ export function SessionScreen({
           onSend(text)
         }}
         isSending={isSending}
-        onMicPress={() => {}}
+        onMicPressIn={audioRecorder.startRecording}
+        onMicPressOut={audioRecorder.stopRecording}
         onAttachPress={() => {}}
-        onStopPress={() => {}}
-        micHint="hold to record · tap for hands-free"
+        onStopPress={audioRecorder.cancelRecording}
+        recordingState={audioRecorder.recordingState}
         modelName="Sonnet"
         providerName="Build"
       />

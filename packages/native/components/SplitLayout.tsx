@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { View, Text, Pressable, Modal } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useColorScheme } from 'nativewind'
+import { Menu, FolderOpen, Settings, X } from 'lucide-react-native'
 import { SessionHeader } from './SessionHeader'
 import { TabBar } from './TabBar'
 import { ChatThread } from './ChatThread'
@@ -12,6 +14,7 @@ import type { Message } from '../hooks/useSessionMessages'
 import type { ChangedFile } from '../hooks/useChanges'
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings'
 import type { LeftPanelContent } from '../state/ui'
+import type { RecordingState } from '../hooks/useAudioRecorder'
 
 interface SplitLayoutProps {
   sessionId: string
@@ -23,6 +26,12 @@ interface SplitLayoutProps {
   onToolCallPress?: (messageId: string) => void
   onSend: (text: string) => void
   isSending?: boolean
+  audioRecorder: {
+    recordingState: RecordingState
+    startRecording: () => void
+    stopRecording: () => void
+    cancelRecording: () => void
+  }
   settings: {
     serverUrl: string
     setServerUrl: (url: string) => void
@@ -47,9 +56,13 @@ export function SplitLayout({
   onToolCallPress,
   onSend,
   isSending,
+  audioRecorder,
   settings,
 }: SplitLayoutProps) {
   const insets = useSafeAreaInsets()
+  const { colorScheme } = useColorScheme()
+  const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C'
+  const mutedIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E'
   const [textValue, setTextValue] = useState('')
   const [leftPanel, setLeftPanel] = useState<LeftPanelContent>({ type: 'changes' })
   const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session')
@@ -91,7 +104,7 @@ export function SplitLayout({
             className="w-9 h-9 items-center justify-center"
             hitSlop={8}
           >
-            <Text className="text-stone-700 dark:text-stone-400 text-lg">☰</Text>
+            <Menu size={20} color={iconColor} />
           </Pressable>
           <View className="flex-row items-center gap-2">
             <View className="w-2 h-2 rounded-full bg-green-500" />
@@ -99,7 +112,7 @@ export function SplitLayout({
               className="text-sm font-semibold text-stone-900 dark:text-stone-50"
               style={{ fontFamily: 'JetBrains Mono' }}
             >
-              {session.name.includes('/') ? session.name : 'opencode-rn'}
+              {session.directory ? session.directory.split('/').pop() || session.directory : ''}
             </Text>
           </View>
         </View>
@@ -112,14 +125,14 @@ export function SplitLayout({
             className="w-9 h-9 items-center justify-center"
             hitSlop={8}
           >
-            <Text className="text-stone-700 dark:text-stone-400 text-lg">⚙</Text>
+            <Settings size={20} color={iconColor} />
           </Pressable>
           <Pressable
             onPress={onProjectsPress}
             className="w-9 h-9 items-center justify-center"
             hitSlop={8}
           >
-            <Text className="text-stone-700 dark:text-stone-400 text-lg">📁</Text>
+            <FolderOpen size={20} color={iconColor} />
           </Pressable>
         </View>
       </View>
@@ -141,7 +154,7 @@ export function SplitLayout({
             className="w-7 h-7 items-center justify-center"
             hitSlop={8}
           >
-            <Text className="text-stone-400 dark:text-stone-600 text-sm">✕</Text>
+            <X size={16} color={mutedIconColor} />
           </Pressable>
         )}
       </View>
@@ -175,10 +188,11 @@ export function SplitLayout({
               onSend(text)
             }}
             isSending={isSending}
-            onMicPress={() => {}}
+            onMicPressIn={audioRecorder.startRecording}
+            onMicPressOut={audioRecorder.stopRecording}
             onAttachPress={() => {}}
-            onStopPress={() => {}}
-            micHint="hold to record · tap for hands-free"
+            onStopPress={audioRecorder.cancelRecording}
+            recordingState={audioRecorder.recordingState}
             modelName="Sonnet"
             providerName="Build"
           />

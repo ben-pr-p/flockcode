@@ -1,5 +1,6 @@
 import React from 'react'
 import { View, Text } from 'react-native'
+import { Mic } from 'lucide-react-native'
 
 interface UserMessageBubbleProps {
   content: string
@@ -8,17 +9,27 @@ interface UserMessageBubbleProps {
 }
 
 export function UserMessageBubble({ content, isVoice, syncStatus }: UserMessageBubbleProps) {
-  const isQueued = syncStatus !== 'synced'
+  const isTranscribing = syncStatus === 'sending' && isVoice
+  const isQueued = syncStatus === 'pending' || syncStatus === 'failed'
 
   return (
     <View className="items-end">
       <View className="bg-white dark:bg-stone-900 rounded-xl px-3.5 py-2.5 max-w-[85%]">
         {isVoice && (
-          <Text className="text-[10px] text-stone-400 dark:text-stone-600 mb-1" style={{ fontFamily: 'JetBrains Mono' }}>
-            🎙 voice message
-          </Text>
+          <View className="flex-row items-center gap-1 mb-1">
+            <Mic size={10} color="#A8A29E" />
+            <Text className="text-[10px] text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>
+              voice message
+            </Text>
+          </View>
         )}
-        <Text className="text-sm font-medium text-stone-900 dark:text-stone-50 leading-5" style={{ fontFamily: 'JetBrains Mono' }}>{content}</Text>
+        {isTranscribing ? (
+          <Text className="text-sm font-medium text-stone-400 dark:text-stone-500 leading-5 italic" style={{ fontFamily: 'JetBrains Mono' }}>
+            Transcribing...
+          </Text>
+        ) : (
+          <Text className="text-sm font-medium text-stone-900 dark:text-stone-50 leading-5" style={{ fontFamily: 'JetBrains Mono' }}>{content}</Text>
+        )}
         {isQueued && (
           <Text className="text-[10px] text-amber-500 mt-1.5" style={{ fontFamily: 'JetBrains Mono' }}>
             queued · will send when online
