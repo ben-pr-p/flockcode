@@ -117,11 +117,18 @@ export class ChangeList extends RpcTarget {
   }
 
   async getState(): Promise<File[]> {
-    const res = await this.#client.file.status({
-      query: { directory: undefined },
+    const res = await this.#client.session.diff({
+      path: { id: this.#sessionId },
     })
-    if (res.error) throw new Error("Failed to get file status")
-    return (res.data ?? []) as File[]
+    if (res.error) throw new Error(`Failed to get changes: ${this.#sessionId}`)
+    return (res.data ?? []).map((d: any) => ({
+      path: d.file,
+      added: d.additions,
+      removed: d.deletions,
+      status: d.status === "deleted" ? "deleted"
+        : d.status === "added" ? "added"
+        : "modified" as "added" | "deleted" | "modified",
+    }))
   }
 }
 
@@ -358,13 +365,28 @@ export class SessionHandle extends RpcTarget {
     return new ChangeList(this.#client, this.#sessionId, onStateChanged)
   }
 
-  // Legacy — kept for backward compat with existing tests
+  // Derive file-level change summary from session diffs
   async changes(): Promise<File[]> {
-    const res = await this.#client.file.status({
-      query: { directory: undefined },
+    const res = await this.#client.session.diff({
+      path: { id: this.#sessionId },
     })
-    if (res.error) throw new Error("Failed to get file status")
-    return (res.data ?? []) as File[]
+    if (res.error) throw new Error(`Failed to get changes: ${this.#sessionId}`)
+    return (res.data ?? []).map((d: any) => ({
+      path: d.file,
+      added: d.additions,
+      removed: d.deletions,
+      status: d.status === "deleted" ? "deleted"
+        : d.status === "added" ? "added"
+        : "modified" as "added" | "deleted" | "modified",
+    }))
+  }
+
+  async diff(): Promise<import("./types").FileDiff[]> {
+    const res = await this.#client.session.diff({
+      path: { id: this.#sessionId },
+    })
+    if (res.error) throw new Error(`Failed to get diff: ${this.#sessionId}`)
+    return (res.data ?? []) as import("./types").FileDiff[]
   }
 
   async revert(messageId: string): Promise<Session> {

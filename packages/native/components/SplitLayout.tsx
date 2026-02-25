@@ -25,6 +25,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 interface SplitLayoutProps {
+  sessionId: string
   session: Session
   messages: Message[]
   changes: ChangedFile[]
@@ -46,6 +47,7 @@ interface SplitLayoutProps {
 }
 
 export function SplitLayout({
+  sessionId,
   session,
   messages,
   changes,
@@ -162,7 +164,7 @@ export function SplitLayout({
               </Text>
             </View>
           ) : (
-            <ChangesView changes={changes} />
+            <ChangesView sessionId={sessionId} changes={changes} />
           )}
         </View>
 

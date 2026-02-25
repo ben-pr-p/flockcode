@@ -271,9 +271,17 @@ const MessageError = z.discriminatedUnion("name", [
   UnknownError,
 ])
 
-// --- FileDiff used in user message summaries ---
+// --- FileDiff used in user message summaries and session diffs ---
 
-const FileDiff = z.object({
+export interface FileDiff {
+  file: string
+  before: string
+  after: string
+  additions: number
+  deletions: number
+}
+
+const FileDiffSchema = z.object({
   file: z.string(),
   before: z.string(),
   after: z.string(),
@@ -294,7 +302,7 @@ const UserMessageInfo = z.object({
   summary: z.object({
     title: z.string().optional(),
     body: z.string().optional(),
-    diffs: z.array(FileDiff),
+    diffs: z.array(FileDiffSchema),
   }).optional(),
   agent: z.string(),
   model: z.object({

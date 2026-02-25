@@ -83,6 +83,7 @@ function SessionDataLoader({
   if (isTabletLandscape) {
     return (
       <SplitLayout
+        sessionId={sessionId}
         session={session}
         messages={messages}
         changes={changes}
@@ -96,6 +97,7 @@ function SessionDataLoader({
 
   return (
     <SessionScreen
+      sessionId={sessionId}
       session={session}
       messages={messages}
       changes={changes}

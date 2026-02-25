@@ -54,3 +54,4 @@ See `packages/server/AGENTS.md` for detailed server docs.
 - **TypeScript** across all packages
 - Each package has its own `AGENTS.md` with package-specific guidance
 - Run commands from the package directory, not the root
+- Keep this guide updated when conventions change

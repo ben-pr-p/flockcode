@@ -22,6 +22,7 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 interface SessionScreenProps {
+  sessionId: string
   session: Session
   messages: Message[]
   changes: ChangedFile[]
@@ -34,6 +35,7 @@ interface SessionScreenProps {
 }
 
 export function SessionScreen({
+  sessionId,
   session,
   messages,
   changes,
@@ -66,7 +68,7 @@ export function SessionScreen({
       ) : activeTab === 'session' ? (
         <ChatThread messages={messages} onToolCallPress={onToolCallPress} />
       ) : (
-        <ChangesView changes={changes} />
+        <ChangesView sessionId={sessionId} changes={changes} />
       )}
 
       <VoiceInputArea

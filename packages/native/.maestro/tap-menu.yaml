@@ -1,0 +1,6 @@
+appId: host.exp.Exponent
+---
+- tapOn:
+    id: "menu-button"
+- waitForAnimationToEnd
+- takeScreenshot: .maestro/screenshots/sidebar
