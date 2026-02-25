@@ -1,46 +1,48 @@
-import React, { useState, useRef, useCallback } from 'react'
-import { View, Text, Pressable, Animated } from 'react-native'
-import { StatusBar } from 'expo-status-bar'
-import { SafeAreaProvider } from 'react-native-safe-area-context'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import React, { useState, useRef, useCallback } from 'react';
+import { View, Text, Pressable, Animated } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import './global.css'
-import { SessionContent } from './components/SessionContent'
-import { SessionsSidebar } from './components/SessionsSidebar'
-import { ProjectsSidebar } from './components/ProjectsSidebar'
-import { SettingsScreen } from './components/SettingsScreen'
-import { EmptySession } from './components/EmptySession'
-import { useMusicPlayer } from './hooks/useMusicPlayer'
-import { useSettings } from './hooks/useSettings'
-import { useLayout } from './hooks/useLayout'
+import './global.css';
+import { SessionContent } from './components/SessionContent';
+import { SessionsSidebar } from './components/SessionsSidebar';
+import { ProjectsSidebar } from './components/ProjectsSidebar';
+import { SettingsScreen } from './components/SettingsScreen';
+import { EmptySession } from './components/EmptySession';
+import { useMusicPlayer } from './hooks/useMusicPlayer';
+import { useSettings } from './hooks/useSettings';
+import { useLayout } from './hooks/useLayout';
 
-const ANIMATION_DURATION = 280
+const ANIMATION_DURATION = 280;
 
 export default function App() {
-  const { isTabletLandscape, width: screenWidth } = useLayout()
-  const sidebarWidth = screenWidth * 0.85
-  const router = useRouter()
-  const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>()
+  const { isTabletLandscape, width: screenWidth } = useLayout();
+  const sidebarWidth = screenWidth * 0.85;
+  const router = useRouter();
+  const params = useLocalSearchParams<{ worktree?: string; sessionId?: string }>();
 
-  const sessionId = params.sessionId
+  console.log(params);
+  const sessionId = params.sessionId;
+  const worktree = params.worktree;
 
   // Settings (only used for phone layout; iPad handles settings in left panel)
-  const [settingsVisible, setSettingsVisible] = useState(false)
-  const settings = useSettings()
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const settings = useSettings();
 
   // Left sidebar (sessions)
-  const [leftSidebarVisible, setLeftSidebarVisible] = useState(false)
-  const leftSlideAnim = useRef(new Animated.Value(-sidebarWidth)).current
-  const leftBackdropAnim = useRef(new Animated.Value(0)).current
+  const [leftSidebarVisible, setLeftSidebarVisible] = useState(false);
+  const leftSlideAnim = useRef(new Animated.Value(-sidebarWidth)).current;
+  const leftBackdropAnim = useRef(new Animated.Value(0)).current;
 
   // Right sidebar (projects)
-  const [rightSidebarVisible, setRightSidebarVisible] = useState(false)
-  const rightSlideAnim = useRef(new Animated.Value(sidebarWidth)).current
-  const rightBackdropAnim = useRef(new Animated.Value(0)).current
-  const musicPlayer = useMusicPlayer()
+  const [rightSidebarVisible, setRightSidebarVisible] = useState(false);
+  const rightSlideAnim = useRef(new Animated.Value(sidebarWidth)).current;
+  const rightBackdropAnim = useRef(new Animated.Value(0)).current;
+  const musicPlayer = useMusicPlayer();
 
   const openLeftSidebar = useCallback(() => {
-    setLeftSidebarVisible(true)
+    setLeftSidebarVisible(true);
     Animated.parallel([
       Animated.timing(leftSlideAnim, {
         toValue: 0,
@@ -52,8 +54,8 @@ export default function App() {
         duration: ANIMATION_DURATION,
         useNativeDriver: true,
       }),
-    ]).start()
-  }, [leftSlideAnim, leftBackdropAnim])
+    ]).start();
+  }, [leftSlideAnim, leftBackdropAnim]);
 
   const closeLeftSidebar = useCallback(() => {
     Animated.parallel([
@@ -68,12 +70,12 @@ export default function App() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      setLeftSidebarVisible(false)
-    })
-  }, [leftSlideAnim, leftBackdropAnim, sidebarWidth])
+      setLeftSidebarVisible(false);
+    });
+  }, [leftSlideAnim, leftBackdropAnim, sidebarWidth]);
 
   const openRightSidebar = useCallback(() => {
-    setRightSidebarVisible(true)
+    setRightSidebarVisible(true);
     Animated.parallel([
       Animated.timing(rightSlideAnim, {
         toValue: 0,
@@ -85,8 +87,8 @@ export default function App() {
         duration: ANIMATION_DURATION,
         useNativeDriver: true,
       }),
-    ]).start()
-  }, [rightSlideAnim, rightBackdropAnim])
+    ]).start();
+  }, [rightSlideAnim, rightBackdropAnim]);
 
   const closeRightSidebar = useCallback(() => {
     Animated.parallel([
@@ -101,28 +103,37 @@ export default function App() {
         useNativeDriver: true,
       }),
     ]).start(() => {
-      setRightSidebarVisible(false)
-    })
-  }, [rightSlideAnim, rightBackdropAnim, sidebarWidth])
+      setRightSidebarVisible(false);
+    });
+  }, [rightSlideAnim, rightBackdropAnim, sidebarWidth]);
 
   const openSettings = useCallback(() => {
-    closeLeftSidebar()
-    setSettingsVisible(true)
-  }, [closeLeftSidebar])
+    closeLeftSidebar();
+    setSettingsVisible(true);
+  }, [closeLeftSidebar]);
 
   const closeSettings = useCallback(() => {
-    setSettingsVisible(false)
-  }, [])
+    setSettingsVisible(false);
+  }, []);
 
-  const handleSelectProject = useCallback((projectId: string) => {
-    router.push(`/projects/${projectId}`)
-    closeRightSidebar()
-  }, [router, closeRightSidebar])
+  const handleSelectProject = useCallback(
+    (wt: string) => {
+      router.push({ pathname: '/projects/[worktree]', params: { worktree: wt } });
+      closeRightSidebar();
+    },
+    [router, closeRightSidebar]
+  );
 
-  const handleSelectSession = useCallback((sessionId: string, projectId: string) => {
-    router.push(`/projects/${projectId}/sessions/${sessionId}`)
-    closeLeftSidebar()
-  }, [router, closeLeftSidebar])
+  const handleSelectSession = useCallback(
+    (sessionId: string, wt: string) => {
+      router.push({
+        pathname: '/projects/[worktree]/sessions/[sessionId]',
+        params: { worktree: wt, sessionId },
+      });
+      closeLeftSidebar();
+    },
+    [router, closeLeftSidebar]
+  );
 
   return (
     <SafeAreaProvider>
@@ -150,10 +161,7 @@ export default function App() {
             settings={settings}
           />
         ) : (
-          <EmptySession
-            onMenuPress={openLeftSidebar}
-            onProjectsPress={openRightSidebar}
-          />
+          <EmptySession onMenuPress={openLeftSidebar} onProjectsPress={openRightSidebar} />
         )}
 
         {/* Left sidebar overlay (sessions) */}
@@ -161,16 +169,19 @@ export default function App() {
           <View className="absolute inset-0" style={{ zIndex: 50 }}>
             <Animated.View
               className="absolute inset-0 bg-black"
-              style={{ opacity: leftBackdropAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }}
-            >
+              style={{
+                opacity: leftBackdropAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.5],
+                }),
+              }}>
               <Pressable className="flex-1" onPress={closeLeftSidebar} />
             </Animated.View>
             <Animated.View
-              className="absolute top-0 bottom-0 left-0"
-              style={{ width: sidebarWidth, transform: [{ translateX: leftSlideAnim }] }}
-            >
+              className="absolute bottom-0 left-0 top-0"
+              style={{ width: sidebarWidth, transform: [{ translateX: leftSlideAnim }] }}>
               <SessionsSidebar
-                projectId={params.projectId}
+                worktree={worktree}
                 selectedSessionId={params.sessionId ?? null}
                 onClose={closeLeftSidebar}
                 onNewSession={() => {}}
@@ -189,16 +200,19 @@ export default function App() {
           <View className="absolute inset-0" style={{ zIndex: 50 }}>
             <Animated.View
               className="absolute inset-0 bg-black"
-              style={{ opacity: rightBackdropAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }}
-            >
+              style={{
+                opacity: rightBackdropAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 0.5],
+                }),
+              }}>
               <Pressable className="flex-1" onPress={closeRightSidebar} />
             </Animated.View>
             <Animated.View
-              className="absolute top-0 bottom-0 right-0"
-              style={{ width: sidebarWidth, transform: [{ translateX: rightSlideAnim }] }}
-            >
+              className="absolute bottom-0 right-0 top-0"
+              style={{ width: sidebarWidth, transform: [{ translateX: rightSlideAnim }] }}>
               <ProjectsSidebar
-                selectedProjectId={params.projectId ?? null}
+                selectedWorktree={worktree ?? null}
                 onClose={closeRightSidebar}
                 onAddProject={() => {}}
                 onSelectProject={handleSelectProject}
@@ -212,5 +226,5 @@ export default function App() {
       </View>
       <StatusBar style="light" />
     </SafeAreaProvider>
-  )
+  );
 }

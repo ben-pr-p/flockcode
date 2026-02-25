@@ -1,13 +1,14 @@
 import React, { useState } from 'react'
-import { View } from 'react-native'
+import { View, Text } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { SessionHeader } from './SessionHeader'
 import { TabBar } from './TabBar'
 import { ChatThread } from './ChatThread'
 import { ChangesView } from './ChangesView'
 import { VoiceInputArea } from './VoiceInputArea'
-import type { Session } from '../__fixtures__/sessions'
-import type { Message, ChangedFile } from '../__fixtures__/messages'
+import type { Session } from '../hooks/useSession'
+import type { Message } from '../hooks/useSessionMessages'
+import type { ChangedFile } from '../hooks/useChanges'
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp
@@ -29,6 +30,7 @@ interface SessionScreenProps {
   onMenuPress: () => void
   onProjectsPress: () => void
   onToolCallPress?: (messageId: string) => void
+  emptyMessage?: string
 }
 
 export function SessionScreen({
@@ -40,6 +42,7 @@ export function SessionScreen({
   onMenuPress,
   onProjectsPress,
   onToolCallPress,
+  emptyMessage,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -56,7 +59,11 @@ export function SessionScreen({
 
       <TabBar activeTab={activeTab} onTabChange={onTabChange} />
 
-      {activeTab === 'session' ? (
+      {emptyMessage ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-oc-text-muted text-sm text-center">{emptyMessage}</Text>
+        </View>
+      ) : activeTab === 'session' ? (
         <ChatThread messages={messages} onToolCallPress={onToolCallPress} />
       ) : (
         <ChangesView changes={changes} />

@@ -5,7 +5,7 @@ import { ToolOutputBlock } from './ToolOutputBlock'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { UserMessageBubble } from './UserMessageBubble'
 import { AssistantMessageBubble } from './AssistantMessageBubble'
-import type { Message } from '../__fixtures__/messages'
+import type { Message } from '../hooks/useSessionMessages'
 
 interface ChatThreadProps {
   messages: Message[]

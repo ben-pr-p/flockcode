@@ -2,14 +2,13 @@ import { useMemo } from 'react'
 import { useAtomValue } from 'jotai'
 import { apiAtom } from '../lib/api'
 import { useRpcTarget } from './useRpcTarget'
-import { useProjects } from './useProjects'
 import type { Session } from '../../server/src/types'
 
 const DAY = 24 * 60 * 60_000
 
 export interface SidebarSession {
   id: string
-  projectId: string
+  worktree: string
   name: string
   projectName: string
   status: 'active' | 'idle'
@@ -39,30 +38,28 @@ function projectName(worktree: string): string {
   return worktree.split('/').pop() || worktree
 }
 
+const EMPTY: GroupedSessions = { recent: [], earlier: [] }
+
 export function useSidebarSessions(
-  projectId: string | undefined,
+  worktree: string,
   searchQuery: string
 ): { data: GroupedSessions; isLoading: boolean } {
   const api = useAtomValue(apiAtom)
-  const { data: projects } = useProjects()
 
   const { data: sessions, isLoading } = useRpcTarget(
-    () => api.sessionList(),
-    [api],
+    () => api.sessionList(worktree),
+    [api, worktree],
   )
 
   const grouped = useMemo(() => {
-    const projectMap = new Map(projects.map((p) => [p.id, projectName(p.worktree)]))
-
     const mapped = (sessions ?? [])
-      .filter((s) => !projectId || s.projectID === projectId)
       .map((s): SidebarSession => {
         const isActive = Date.now() - s.time.updated < 5 * 60_000
         return {
           id: s.id,
-          projectId: s.projectID,
+          worktree: s.directory,
           name: s.title || 'Untitled',
-          projectName: projectMap.get(s.projectID) ?? 'unknown',
+          projectName: projectName(s.directory),
           status: isActive ? 'active' : 'idle',
           relativeTime: formatRelativeTime(s.time.updated),
           updatedAt: s.time.updated,
@@ -83,7 +80,7 @@ export function useSidebarSessions(
       recent: filtered.filter((s) => s.updatedAt >= cutoff),
       earlier: filtered.filter((s) => s.updatedAt < cutoff),
     }
-  }, [sessions, projects, projectId, searchQuery])
+  }, [sessions, searchQuery])
 
   return { data: grouped, isLoading }
 }

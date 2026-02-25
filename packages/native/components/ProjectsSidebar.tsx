@@ -6,12 +6,12 @@ import { MusicPlayerBar } from './MusicPlayerBar'
 import { useProjects } from '../hooks/useProjects'
 
 interface ProjectsSidebarProps {
-  selectedProjectId: string | null
+  selectedWorktree: string | null
   onClose: () => void
   onAddProject: () => void
-  onSelectProject: (id: string) => void
-  onNewSession: (projectId: string) => void
-  onOverflow: (projectId: string) => void
+  onSelectProject: (worktree: string) => void
+  onNewSession: (worktree: string) => void
+  onOverflow: (worktree: string) => void
   musicPlayer: {
     track: { name: string; artist: string; albumArtUri: string; durationMs: number } | null
     isPlaying: boolean
@@ -26,7 +26,7 @@ interface ProjectsSidebarProps {
 }
 
 export function ProjectsSidebar({
-  selectedProjectId,
+  selectedWorktree,
   onClose,
   onAddProject,
   onSelectProject,
@@ -142,7 +142,7 @@ export function ProjectsSidebar({
               key={project.id}
               project={project}
               index={index}
-              isSelected={project.id === selectedProjectId}
+              isSelected={project.worktree === selectedWorktree}
               onPress={onSelectProject}
               onNewSession={onNewSession}
               onOverflow={onOverflow}

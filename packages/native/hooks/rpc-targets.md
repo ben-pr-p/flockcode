@@ -16,10 +16,10 @@ Api (root)
 │   ├── getSession(id, onStateChanged?) ──► SessionHandle
 │   └── createSession(onStateChanged?) ──► SessionHandle
 │
-├── sessionList(onStateChanged?) ──► SessionList
-│   └── getState() → Session[]
+├── sessionList(worktree, onStateChanged?) ──► SessionList
+│   └── getState() → Session[]                  (filtered by directory prefix)
 │
-├── listSessions(projectId?) → Session[]          (legacy)
+├── listSessions() → Session[]                    (legacy, unfiltered)
 │
 ├── getSession(id, onStateChanged?) ──► SessionHandle
 │   ├── getState() → { status, opencode }
@@ -51,8 +51,7 @@ App
 │       ├── SessionScreen                          (phone layout, pure presentational)
 │       └── SplitLayout                            (tablet layout, pure presentational)
 ├── SessionsSidebar
-│   └── useSidebarSessions(projectId, searchQuery)
-│       └── useProjects()                          (internal, for project name lookup)
+│   └── useSidebarSessions(worktree, searchQuery)  ← only mounts when worktree selected
 └── ProjectsSidebar
     └── useProjects()
 ```
@@ -62,8 +61,7 @@ App
 | Hook                  | Mounted in             | RPC call                          | Returns        |
 |-----------------------|------------------------|-----------------------------------|----------------|
 | `useProjects`         | `ProjectsSidebar`      | `api.projectList().getState()`    | `Project[]`    |
-| `useProjects`         | `useSidebarSessions`   | `api.projectList().getState()`    | `Project[]`    |
-| `useSidebarSessions`  | `SessionsSidebar`      | `api.sessionList().getState()`    | `Session[]`    |
+| `useSidebarSessions`  | `SessionListContent`   | `api.sessionList(wt).getState()`  | `Session[]`    |
 | `useSession`          | `SessionContent`       | `api.getSession(id).info()`       | session info   |
 | `useSessionMessages`  | `SessionDataLoader`    | `api.getSession(id).messages()`   | `Message[]`    |
 | `useChanges`          | `SessionDataLoader`    | `api.getSession(id).changes()`    | `ChangedFile[]`|

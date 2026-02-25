@@ -5,7 +5,7 @@ import { useRpcTarget } from './useRpcTarget'
 // Re-export the UI Session type that components expect
 export interface Session {
   id: string
-  projectId: string
+  directory: string
   name: string
   branchName: string | null
   status: 'active' | 'idle'
@@ -26,7 +26,7 @@ class SessionStateTarget {
     const isActive = Date.now() - info.time.updated < 5 * 60_000
     return {
       id: info.id,
-      projectId: info.projectID,
+      directory: info.directory,
       name: info.title || 'Untitled',
       branchName: null,
       status: isActive ? 'active' : 'idle',

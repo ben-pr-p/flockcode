@@ -8,25 +8,25 @@ import type { Api } from "./rpc"
 
 let serverProc: ReturnType<typeof Bun.spawn>
 
-beforeAll(async () => {
-  serverProc = Bun.spawn(["bun", "src/index.ts", "--port", "3001"], {
-    cwd: import.meta.dir + "/..",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  // Wait for server to be ready
-  for (let i = 0; i < 30; i++) {
-    try {
-      const res = await fetch("http://localhost:3001/health")
-      if (res.ok) break
-    } catch {}
-    await Bun.sleep(100)
-  }
-})
+// beforeAll(async () => {
+//   serverProc = Bun.spawn(["bun", "src/index.ts", "--port", "3001"], {
+//     cwd: import.meta.dir + "/..",
+//     stdout: "pipe",
+//     stderr: "pipe",
+//   })
+//   // Wait for server to be ready
+//   for (let i = 0; i < 30; i++) {
+//     try {
+//       const res = await fetch("http://localhost:3001/health")
+//       if (res.ok) break
+//     } catch {}
+//     await Bun.sleep(100)
+//   }
+// })
 
-afterAll(() => {
-  serverProc?.kill()
-})
+// afterAll(() => {
+//   serverProc?.kill()
+// })
 
 describe("health", () => {
   test("GET /health returns ok", async () => {
@@ -45,21 +45,8 @@ describe("HTTP batch RPC", () => {
     expect(projects.length).toBeGreaterThan(0)
     const p = projects[0]
     expect(p).toHaveProperty("id")
-    expect(p).toHaveProperty("name")
-    expect(p).toHaveProperty("path")
-    expect(typeof p.sessionCount).toBe("number")
-    expect(typeof p.activeSessionCount).toBe("number")
-    expect(typeof p.lastActiveAt).toBe("number")
-  })
-
-  test("listProjects sorted by lastActiveAt desc", async () => {
-    const api = newHttpBatchRpcSession<Api>("http://localhost:3001/rpc")
-    const projects = await api.listProjects()
-    for (let i = 1; i < projects.length; i++) {
-      expect(projects[i - 1].lastActiveAt).toBeGreaterThanOrEqual(
-        projects[i].lastActiveAt
-      )
-    }
+    expect(p).toHaveProperty("worktree")
+    expect(typeof p.time.created).toBe("number")
   })
 
   test("listSessions returns sessions", async () => {
@@ -69,19 +56,19 @@ describe("HTTP batch RPC", () => {
     if (sessions.length > 0) {
       const s = sessions[0]
       expect(s).toHaveProperty("id")
-      expect(s).toHaveProperty("projectId")
+      expect(s).toHaveProperty("projectID")
       expect(s).toHaveProperty("title")
-      expect(typeof s.createdAt).toBe("number")
-      expect(typeof s.updatedAt).toBe("number")
+      expect(typeof s.time.created).toBe("number")
+      expect(typeof s.time.updated).toBe("number")
     }
   })
 
-  test("listSessions sorted by updatedAt desc", async () => {
+  test("listSessions sorted by time.updated desc", async () => {
     const api = newHttpBatchRpcSession<Api>("http://localhost:3001/rpc")
     const sessions = await api.listSessions()
     for (let i = 1; i < sessions.length; i++) {
-      expect(sessions[i - 1].updatedAt).toBeGreaterThanOrEqual(
-        sessions[i].updatedAt
+      expect(sessions[i - 1].time.updated).toBeGreaterThanOrEqual(
+        sessions[i].time.updated
       )
     }
   })
@@ -92,10 +79,10 @@ describe("HTTP batch RPC", () => {
     const allSessions = await api1.listSessions()
     if (allSessions.length === 0) return
 
-    const projectId = allSessions[0].projectId
+    const projectId = allSessions[0].projectID
     const api2 = newHttpBatchRpcSession<Api>("http://localhost:3001/rpc")
     const filtered = await api2.listSessions(projectId)
-    expect(filtered.every((s) => s.projectId === projectId)).toBe(true)
+    expect(filtered.every((s) => s.projectID === projectId)).toBe(true)
   })
 })
 
@@ -109,7 +96,7 @@ describe("WebSocket RPC", () => {
     const info = await handle.info()
     expect(info.id).toBe(sessions[0].id)
     expect(info).toHaveProperty("title")
-    expect(info).toHaveProperty("projectId")
+    expect(info).toHaveProperty("projectID")
   })
 
   test("promise pipelining: getSession().info() in one call", async () => {
@@ -168,15 +155,14 @@ describe("WebSocket RPC", () => {
     // changes may be empty if no files are modified
   })
 
-  test("getProject returns project with session counts", async () => {
+  test("getProject returns project with worktree", async () => {
     using api = newWebSocketRpcSession<Api>("ws://localhost:3001/rpc")
     const projects = await api.listProjects()
     if (projects.length === 0) return
 
     const project = await api.getProject(projects[0].id)
-    expect(project.id).toBe(projects[0].id)
-    expect(typeof project.sessionCount).toBe("number")
-    expect(typeof project.activeSessionCount).toBe("number")
+    expect(await project.id).toBe(projects[0].id)
+    expect(typeof await project.worktree).toBe("string")
   })
 
   test("getProject throws for invalid id", async () => {

@@ -54,15 +54,12 @@ export class SessionList extends RpcTarget {
   }
 
   async getState(): Promise<Session[]> {
-    const res = await this.#client.session.list()
+    const query = this.#worktree && this.#worktree !== '/'
+      ? { directory: this.#worktree }
+      : undefined
+    const res = await this.#client.session.list({ query })
     if (res.error) throw new Error("Failed to list sessions")
-    let sessions = (res.data ?? []) as Session[]
-    if (this.#worktree) {
-      const wt = this.#worktree
-      sessions = sessions.filter((s) =>
-        s.directory === wt || s.directory.startsWith(wt + "/")
-      )
-    }
+    const sessions = (res.data ?? []) as Session[]
     return sessions.sort((a, b) => b.time.updated - a.time.updated)
   }
 }
@@ -180,9 +177,9 @@ export class Api extends RpcTarget {
     return sessions.sort((a, b) => b.time.updated - a.time.updated)
   }
 
-  // Returns a reactive SessionList RPC target
-  sessionList(onStateChanged?: OnStateChangedFn<Session[]>): SessionList {
-    return new SessionList(this.#client, undefined, onStateChanged)
+  // Returns a reactive SessionList RPC target filtered by worktree
+  sessionList(worktree: string, onStateChanged?: OnStateChangedFn<Session[]>): SessionList {
+    return new SessionList(this.#client, worktree, onStateChanged)
   }
 
   getSession(id: string, onSessionStateChanged?: OnStateChangedFn<SessionState>): SessionHandle {

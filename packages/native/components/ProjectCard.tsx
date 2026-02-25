@@ -22,9 +22,14 @@ interface ProjectCardProps {
   project: Project
   index: number
   isSelected: boolean
-  onPress: (id: string) => void
-  onNewSession: (id: string) => void
-  onOverflow: (id: string) => void
+  onPress: (worktree: string) => void
+  onNewSession: (worktree: string) => void
+  onOverflow: (worktree: string) => void
+}
+
+function projectName(worktree: string): string {
+  if (worktree === '/') return 'global'
+  return worktree.split('/').pop() || worktree
 }
 
 export function ProjectCard({
@@ -35,12 +40,14 @@ export function ProjectCard({
   onNewSession,
   onOverflow,
 }: ProjectCardProps) {
+  const name = projectName(project.worktree)
   const avatarColor = isSelected ? '#22D3EE' : (AVATAR_COLORS[index % AVATAR_COLORS.length] ?? '#475569')
-  const initial = project.name.charAt(0).toUpperCase()
+  const initial = name.charAt(0).toUpperCase()
+  const lastActiveAt = (project.time as any).updated ?? project.time.created
 
   return (
     <Pressable
-      onPress={() => onPress(project.id)}
+      onPress={() => onPress(project.worktree)}
       className="rounded-xl bg-[#1E293B] p-4 gap-2.5"
     >
       {/* Header row: avatar + name/path + overflow */}
@@ -53,41 +60,28 @@ export function ProjectCard({
         </View>
 
         <View className="flex-1 gap-0.5">
-          <Text className="text-[15px] font-semibold text-white">{project.name}</Text>
+          <Text className="text-[15px] font-semibold text-white">{name}</Text>
           <Text className="text-[11px] text-[#475569] font-normal" style={{ fontFamily: 'JetBrains Mono' }}>
-            {project.path}
+            {project.worktree}
           </Text>
         </View>
 
-        <Pressable onPress={() => onOverflow(project.id)} hitSlop={8}>
+        <Pressable onPress={() => onOverflow(project.worktree)} hitSlop={8}>
           <Text className="text-[#475569] text-base">···</Text>
         </Pressable>
       </View>
 
       {/* Stats row */}
       <View className="flex-row items-center gap-3">
-        <View className="flex-row items-center gap-1">
-          <Text className="text-[11px] text-[#64748B]" style={{ fontFamily: 'JetBrains Mono' }}>
-            {project.sessionCount} sessions
-          </Text>
-        </View>
-        {project.activeSessionCount > 0 && (
-          <View className="flex-row items-center gap-1">
-            <View className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]" />
-            <Text className="text-[11px] text-[#4ADE80]" style={{ fontFamily: 'JetBrains Mono' }}>
-              {project.activeSessionCount} active
-            </Text>
-          </View>
-        )}
         <Text className="text-[11px] text-[#475569]" style={{ fontFamily: 'JetBrains Mono' }}>
-          · {formatRelativeTime(project.lastActiveAt)}
+          {formatRelativeTime(lastActiveAt)}
         </Text>
       </View>
 
       {/* New session button - only shown on selected project */}
       {isSelected && (
         <Pressable
-          onPress={() => onNewSession(project.id)}
+          onPress={() => onNewSession(project.worktree)}
           className="bg-[#0F172A] rounded-lg h-[38px] items-center justify-center flex-row gap-1.5"
         >
           <Text className="text-[#64748B] text-sm">+</Text>
