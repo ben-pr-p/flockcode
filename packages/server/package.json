@@ -14,6 +14,7 @@
     "@tanstack/ai": "^0.5.1",
     "@tanstack/ai-gemini": "^0.5.0",
     "capnweb": "^0.5.0",
+    "durable-streams-web-standard": "github:ben-pr-p/durable-streams-web-standard",
     "hono": "^4.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

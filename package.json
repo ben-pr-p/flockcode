@@ -3,6 +3,8 @@
   "private": true,
   "workspaces": ["packages/server"],
   "dependencies": {
+    "@durable-streams/client": "^0.2.2",
+    "@tanstack/intent": "^0.0.14",
     "zod": "^4.3.6"
   }
 }
