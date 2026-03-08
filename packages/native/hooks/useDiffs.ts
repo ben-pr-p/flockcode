@@ -1,6 +1,6 @@
+import { useState, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { apiAtom, type RpcApi } from '../lib/api'
-import { useRpcTarget } from './useRpcTarget'
+import { apiClientAtom } from '../lib/api'
 
 export interface FileDiff {
   file: string
@@ -10,34 +10,51 @@ export interface FileDiff {
   deletions: number
 }
 
+const POLL_INTERVAL = 2000
+
 export function useDiffs(sessionId: string | undefined): { data: FileDiff[]; isLoading: boolean } {
-  const api = useAtomValue(apiAtom)
+  const api = useAtomValue(apiClientAtom)
+  const [data, setData] = useState<FileDiff[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const { data, isLoading } = useRpcTarget(
-    () => new DiffTarget(api.getSession(sessionId!)),
-    [api, sessionId],
-  )
-
-  if (!sessionId) {
-    return { data: [], isLoading: false }
-  }
-
-  return { data: data ?? [], isLoading }
-}
-
-class DiffTarget {
-  #handle: ReturnType<RpcApi['getSession']>
-
-  constructor(handle: ReturnType<RpcApi['getSession']>) {
-    this.#handle = handle
-  }
-
-  async getState(): Promise<FileDiff[]> {
-    try {
-      return await this.#handle.diff()
-    } catch {
-      // Server may not support diff() yet — degrade gracefully
-      return []
+  useEffect(() => {
+    if (!sessionId) {
+      setData([])
+      setIsLoading(false)
+      return
     }
-  }
+
+    let cancelled = false
+    setIsLoading(true)
+
+    const load = async () => {
+      try {
+        const res = await api.api.diffs.$get({
+          query: { session: sessionId },
+        })
+        if (!res.ok) throw new Error('Failed to fetch diffs')
+        const diffs = await res.json()
+        if (!cancelled) {
+          setData(diffs as FileDiff[])
+          setIsLoading(false)
+        }
+      } catch (err) {
+        console.error('[useDiffs] fetch failed:', err)
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+
+    load()
+
+    const interval = setInterval(() => {
+      if (!cancelled) load()
+    }, POLL_INTERVAL)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [api, sessionId])
+
+  return { data, isLoading }
 }

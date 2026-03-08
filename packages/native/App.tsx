@@ -15,7 +15,7 @@ import { useMusicPlayer } from './hooks/useMusicPlayer';
 import { useSettings } from './hooks/useSettings';
 import { useLayout } from './hooks/useLayout';
 import { useStateQuery, type ProjectValue } from './lib/stream-db';
-import { apiAtom } from './lib/api';
+import { apiClientAtom } from './lib/api';
 import { newSessionProjectIdAtom } from './state/ui';
 
 export default function App() {
@@ -35,7 +35,7 @@ export default function App() {
       .sort((a, b) => b.time.created - a.time.created) ?? [],
     [rawProjects],
   );
-  const api = useAtomValue(apiAtom);
+  const api = useAtomValue(apiClientAtom);
   const [newSessionProjectId, setNewSessionProjectId] = useAtom(newSessionProjectIdAtom);
 
   // Settings (only used for phone layout; iPad handles settings in left panel)
@@ -175,14 +175,18 @@ export default function App() {
   const navigateToProject = useCallback(
     async (pid: string) => {
       try {
-        const projectHandle = await api.getProject(pid);
-        const sessions = await projectHandle.listSessions();
-        if (sessions.length > 0) {
-          router.push({
-            pathname: '/projects/[projectId]/sessions/[sessionId]',
-            params: { projectId: pid, sessionId: sessions[0].id },
-          });
-          return;
+        const res = await api.api.projects[':projectId'].sessions.$get({
+          param: { projectId: pid },
+        });
+        if (res.ok) {
+          const sessions = await res.json() as any[];
+          if (sessions.length > 0) {
+            router.push({
+              pathname: '/projects/[projectId]/sessions/[sessionId]',
+              params: { projectId: pid, sessionId: sessions[0].id },
+            });
+            return;
+          }
         }
       } catch {}
       router.push({ pathname: '/projects/[projectId]', params: { projectId: pid } });

@@ -1,36 +1,41 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react'
-import { View, Text } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useAtomValue } from 'jotai'
-import { eq } from '@tanstack/react-db'
-import { SessionScreen } from './SessionScreen'
-import { SplitLayout } from './SplitLayout'
-import { SessionHeader } from './SessionHeader'
-import { TabBar } from './TabBar'
-import { VoiceInputArea } from './VoiceInputArea'
-import { useStateQuery, flattenServerMessage, type UIMessage as Message, type SessionValue } from '../lib/stream-db'
-import type { Message as ServerMessage } from '../../server/src/types'
-import { useChanges } from '../hooks/useChanges'
-import { apiAtom } from '../lib/api'
-import { useAudioRecorder } from '../hooks/useAudioRecorder'
-import type { ChangedFile } from '../hooks/useChanges'
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings'
+import React, { useState, useCallback, useMemo, useRef } from 'react';
+import { View, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAtomValue } from 'jotai';
+import { eq } from '@tanstack/react-db';
+import { SessionScreen } from './SessionScreen';
+import { SplitLayout } from './SplitLayout';
+import { SessionHeader } from './SessionHeader';
+import { TabBar } from './TabBar';
+import { VoiceInputArea } from './VoiceInputArea';
+import {
+  useStateQuery,
+  flattenServerMessage,
+  type UIMessage as Message,
+  type SessionValue,
+} from '../lib/stream-db';
+import type { Message as ServerMessage } from '../../server/src/types';
+import { useChanges } from '../hooks/useChanges';
+import { apiClientAtom } from '../lib/api';
+import { useAudioRecorder } from '../hooks/useAudioRecorder';
+import type { ChangedFile } from '../hooks/useChanges';
+import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 
 // ---------------------------------------------------------------------------
 // Settings type shared by both wrappers
 // ---------------------------------------------------------------------------
 
 export interface SessionSettings {
-  serverUrl: string
-  setServerUrl: (url: string) => void
-  connection: ConnectionInfo
-  handsFreeAutoRecord: boolean
-  setHandsFreeAutoRecord: (value: boolean) => void
-  notificationSound: NotificationSound
-  setNotificationSound: (value: NotificationSound) => void
-  notificationSoundOptions: { label: string; value: NotificationSound }[]
-  appVersion: string
-  defaultModel: string
+  serverUrl: string;
+  setServerUrl: (url: string) => void;
+  connection: ConnectionInfo;
+  handsFreeAutoRecord: boolean;
+  setHandsFreeAutoRecord: (value: boolean) => void;
+  notificationSound: NotificationSound;
+  setNotificationSound: (value: NotificationSound) => void;
+  notificationSoundOptions: { label: string; value: NotificationSound }[];
+  appVersion: string;
+  defaultModel: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,17 +46,17 @@ export interface SessionSettings {
 // and delegates to SessionScreen / SplitLayout.
 
 interface SessionViewProps {
-  sessionId: string
-  session: SessionValue
-  serverMessages: Message[]
-  changes: ChangedFile[]
-  isTabletLandscape: boolean
-  onMenuPress: () => void
-  onProjectsPress: () => void
-  settings: SessionSettings
-  onSendText: (text: string) => Promise<void>
-  onSendAudio: (base64: string, mimeType: string) => void
-  emptyMessage?: string
+  sessionId: string;
+  session: SessionValue;
+  serverMessages: Message[];
+  changes: ChangedFile[];
+  isTabletLandscape: boolean;
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
+  settings: SessionSettings;
+  onSendText: (text: string) => Promise<void>;
+  onSendAudio: (base64: string, mimeType: string) => void;
+  emptyMessage?: string;
 }
 
 export function SessionView({
@@ -67,67 +72,71 @@ export function SessionView({
   onSendAudio,
   emptyMessage,
 }: SessionViewProps) {
-  const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session')
-  const [isSending, setIsSending] = useState(false)
-  const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([])
-  const voiceIdCounter = useRef(0)
+  const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session');
+  const [isSending, setIsSending] = useState(false);
+  const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([]);
+  const voiceIdCounter = useRef(0);
 
   // Merge server messages with optimistic voice messages, removing optimistic
   // ones once the server has caught up (new user message appeared)
   const messages = useMemo(() => {
-    if (pendingVoiceMessages.length === 0) return serverMessages
+    if (pendingVoiceMessages.length === 0) return serverMessages;
 
     // Find the latest server user message timestamp
     const latestServerUserMsg = serverMessages
       .filter((m) => m.role === 'user')
-      .reduce((latest, m) => Math.max(latest, m.createdAt), 0)
+      .reduce((latest, m) => Math.max(latest, m.createdAt), 0);
 
     // Keep only pending messages that are newer than the latest server user message
-    const stillPending = pendingVoiceMessages.filter(
-      (m) => m.createdAt > latestServerUserMsg,
-    )
+    const stillPending = pendingVoiceMessages.filter((m) => m.createdAt > latestServerUserMsg);
 
     // Clean up stale pending messages
     if (stillPending.length !== pendingVoiceMessages.length) {
-      setPendingVoiceMessages(stillPending)
+      setPendingVoiceMessages(stillPending);
     }
 
-    return [...serverMessages, ...stillPending]
-  }, [serverMessages, pendingVoiceMessages])
+    return [...serverMessages, ...stillPending];
+  }, [serverMessages, pendingVoiceMessages]);
 
-  const handleSend = useCallback(async (text: string) => {
-    setIsSending(true)
-    try {
-      await onSendText(text)
-    } catch (err) {
-      console.error('[SessionView] send failed:', err)
-    } finally {
-      setIsSending(false)
-    }
-  }, [onSendText])
+  const handleSend = useCallback(
+    async (text: string) => {
+      setIsSending(true);
+      try {
+        await onSendText(text);
+      } catch (err) {
+        console.error('[SessionView] send failed:', err);
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [onSendText]
+  );
 
-  const handleSendAudio = useCallback((base64: string, mimeType: string) => {
-    // Add an optimistic voice message immediately
-    const optimisticId = `voice-pending-${++voiceIdCounter.current}`
-    const optimisticMsg: Message = {
-      id: optimisticId,
-      sessionId,
-      role: 'user',
-      type: 'voice',
-      content: 'Transcribing...',
-      audioUri: null,
-      transcription: null,
-      toolName: null,
-      toolMeta: null,
-      syncStatus: 'sending',
-      createdAt: Date.now(),
-    }
-    setPendingVoiceMessages((prev) => [...prev, optimisticMsg])
+  const handleSendAudio = useCallback(
+    (base64: string, mimeType: string) => {
+      // Add an optimistic voice message immediately
+      const optimisticId = `voice-pending-${++voiceIdCounter.current}`;
+      const optimisticMsg: Message = {
+        id: optimisticId,
+        sessionId,
+        role: 'user',
+        type: 'voice',
+        content: 'Transcribing...',
+        audioUri: null,
+        transcription: null,
+        toolName: null,
+        toolMeta: null,
+        syncStatus: 'sending',
+        createdAt: Date.now(),
+      };
+      setPendingVoiceMessages((prev) => [...prev, optimisticMsg]);
 
-    onSendAudio(base64, mimeType)
-  }, [sessionId, onSendAudio])
+      onSendAudio(base64, mimeType);
+    },
+    [sessionId, onSendAudio]
+  );
 
-  const audioRecorder = useAudioRecorder({ onSendAudio: handleSendAudio })
+  const audioRecorder = useAudioRecorder({ onSendAudio: handleSendAudio });
 
   if (isTabletLandscape) {
     return (
@@ -144,7 +153,7 @@ export function SessionView({
         audioRecorder={audioRecorder}
         settings={settings}
       />
-    )
+    );
   }
 
   return (
@@ -163,7 +172,7 @@ export function SessionView({
       audioRecorder={audioRecorder}
       emptyMessage={emptyMessage}
     />
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -173,11 +182,11 @@ export function SessionView({
 // prompt the existing session.
 
 interface SessionContentProps {
-  sessionId: string
-  isTabletLandscape: boolean
-  onMenuPress: () => void
-  onProjectsPress: () => void
-  settings: SessionSettings
+  sessionId: string;
+  isTabletLandscape: boolean;
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
+  settings: SessionSettings;
 }
 
 export function SessionContent({
@@ -189,19 +198,15 @@ export function SessionContent({
 }: SessionContentProps) {
   const { data: sessionResults, isLoading: sessionLoading } = useStateQuery(
     (db, q) =>
-      q.from({ sessions: db.collections.sessions })
+      q
+        .from({ sessions: db.collections.sessions })
         .where(({ sessions }) => eq(sessions.id, sessionId)),
-    [sessionId],
-  )
-  const session = (sessionResults as SessionValue[] | undefined)?.[0] ?? null
+    [sessionId]
+  );
+  const session = (sessionResults as SessionValue[] | undefined)?.[0] ?? null;
 
   if (sessionLoading || !session) {
-    return (
-      <SessionLoading
-        onMenuPress={onMenuPress}
-        onProjectsPress={onProjectsPress}
-      />
-    )
+    return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
   }
 
   return (
@@ -213,7 +218,7 @@ export function SessionContent({
       onProjectsPress={onProjectsPress}
       settings={settings}
     />
-  )
+  );
 }
 
 // Separate component so useSessionMessages/useChanges only mount when session exists
@@ -225,42 +230,56 @@ function ExistingSessionDataLoader({
   onProjectsPress,
   settings,
 }: {
-  session: SessionValue
-  sessionId: string
-  isTabletLandscape: boolean
-  onMenuPress: () => void
-  onProjectsPress: () => void
-  settings: SessionSettings
+  session: SessionValue;
+  sessionId: string;
+  isTabletLandscape: boolean;
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
+  settings: SessionSettings;
 }) {
-  const api = useAtomValue(apiAtom)
+  const api = useAtomValue(apiClientAtom);
 
   const { data: rawMessages } = useStateQuery(
     (db, q) =>
-      q.from({ messages: db.collections.messages })
+      q
+        .from({ messages: db.collections.messages })
         .where(({ messages }) => eq(messages.sessionId, sessionId)),
-    [sessionId],
-  )
+    [sessionId]
+  );
   const serverMessages = useMemo(() => {
-    if (!rawMessages) return []
+    if (!rawMessages) return [];
     return (rawMessages as ServerMessage[])
       .slice()
       .sort((a, b) => a.createdAt - b.createdAt)
-      .flatMap(flattenServerMessage)
-  }, [rawMessages])
+      .flatMap(flattenServerMessage);
+  }, [rawMessages]);
 
-  const { data: changes } = useChanges(sessionId)
+  const { data: changes } = useChanges(sessionId);
 
-  const handleSendText = useCallback(async (text: string) => {
-    const handle = api.getSession(sessionId)
-    await handle.prompt([{ type: 'text', text }])
-  }, [api, sessionId])
+  const handleSendText = useCallback(
+    async (text: string) => {
+      const res = await api.api.sessions[':sessionId'].prompt.$post({
+        param: { sessionId },
+        json: { parts: [{ type: 'text' as const, text }] },
+      });
+      if (!res.ok) throw new Error('Prompt failed');
+    },
+    [api, sessionId]
+  );
 
-  const handleSendAudio = useCallback((base64: string, mimeType: string) => {
-    const handle = api.getSession(sessionId)
-    handle.prompt([{ type: 'audio', audioData: base64, mimeType }]).catch((err) => {
-      console.error('[SessionContent] audio prompt failed:', err)
-    })
-  }, [api, sessionId])
+  const handleSendAudio = useCallback(
+    (base64: string, mimeType: string) => {
+      api.api.sessions[':sessionId'].prompt
+        .$post({
+          param: { sessionId },
+          json: { parts: [{ type: 'audio' as const, audioData: base64, mimeType }] },
+        })
+        .catch((err) => {
+          console.error('[SessionContent] audio prompt failed:', err);
+        });
+    },
+    [api, sessionId]
+  );
 
   return (
     <SessionView
@@ -275,7 +294,7 @@ function ExistingSessionDataLoader({
       onSendText={handleSendText}
       onSendAudio={handleSendAudio}
     />
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -286,12 +305,12 @@ function ExistingSessionDataLoader({
 // navigating to the real session.
 
 interface NewSessionContentProps {
-  projectId: string
-  isTabletLandscape: boolean
-  onMenuPress: () => void
-  onProjectsPress: () => void
-  onSessionCreated: (sessionId: string, projectId: string) => void
-  settings: SessionSettings
+  projectId: string;
+  isTabletLandscape: boolean;
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
+  onSessionCreated: (sessionId: string, projectId: string) => void;
+  settings: SessionSettings;
 }
 
 export function NewSessionContent({
@@ -302,21 +321,22 @@ export function NewSessionContent({
   onSessionCreated,
   settings,
 }: NewSessionContentProps) {
-  const api = useAtomValue(apiAtom)
+  const api = useAtomValue(apiClientAtom);
   // Guard against multiple simultaneous session creations
-  const creatingRef = useRef(false)
+  const creatingRef = useRef(false);
 
   // Look up the project to get worktree for display name
   const { data: projectResults } = useStateQuery(
     (db, q) =>
-      q.from({ projects: db.collections.projects })
+      q
+        .from({ projects: db.collections.projects })
         .where(({ projects }) => eq(projects.id, projectId)),
-    [projectId],
-  )
-  const project = (projectResults as import('../lib/stream-db').ProjectValue[] | undefined)?.[0]
-  const worktree = project?.worktree ?? ''
+    [projectId]
+  );
+  const project = (projectResults as import('../lib/stream-db').ProjectValue[] | undefined)?.[0];
+  const worktree = project?.worktree ?? '';
 
-  const now = Date.now()
+  const now = Date.now();
   const placeholderSession: SessionValue = {
     id: 'new',
     title: 'New Session',
@@ -324,34 +344,48 @@ export function NewSessionContent({
     projectID: projectId,
     version: '',
     time: { created: now, updated: now },
-  }
+  };
 
   const createAndPrompt = useCallback(
-    async (parts: Array<{ type: 'text'; text: string } | { type: 'audio'; audioData: string; mimeType: string }>) => {
-      if (creatingRef.current) return
-      creatingRef.current = true
+    async (
+      parts: Array<
+        { type: 'text'; text: string } | { type: 'audio'; audioData: string; mimeType: string }
+      >
+    ) => {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
 
       try {
-        const projectHandle = await api.getProject(projectId)
-        const { sessionId } = await projectHandle.createSessionWithPrompt({ parts })
-        onSessionCreated(sessionId, projectId)
+        const res = await api.api.projects[':projectId'].sessions.$post({
+          param: { projectId },
+          json: { parts },
+        });
+        if (!res.ok) throw new Error('Create session failed');
+        const data = (await res.json()) as { sessionId: string };
+        onSessionCreated(data.sessionId, projectId);
       } catch (err) {
-        console.error('[NewSessionContent] createSessionWithPrompt failed:', err)
-        creatingRef.current = false
+        console.error('[NewSessionContent] createSessionWithPrompt failed:', err);
+        creatingRef.current = false;
       }
     },
-    [api, projectId, onSessionCreated],
-  )
+    [api, projectId, onSessionCreated]
+  );
 
-  const handleSendText = useCallback(async (text: string) => {
-    await createAndPrompt([{ type: 'text', text }])
-  }, [createAndPrompt])
+  const handleSendText = useCallback(
+    async (text: string) => {
+      await createAndPrompt([{ type: 'text', text }]);
+    },
+    [createAndPrompt]
+  );
 
-  const handleSendAudio = useCallback((base64: string, mimeType: string) => {
-    createAndPrompt([{ type: 'audio', audioData: base64, mimeType }]).catch((err) => {
-      console.error('[NewSessionContent] audio create + prompt failed:', err)
-    })
-  }, [createAndPrompt])
+  const handleSendAudio = useCallback(
+    (base64: string, mimeType: string) => {
+      createAndPrompt([{ type: 'audio', audioData: base64, mimeType }]).catch((err) => {
+        console.error('[NewSessionContent] audio create + prompt failed:', err);
+      });
+    },
+    [createAndPrompt]
+  );
 
   return (
     <SessionView
@@ -367,7 +401,7 @@ export function NewSessionContent({
       onSendAudio={handleSendAudio}
       emptyMessage="Send a message to start a new session"
     />
-  )
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -378,11 +412,11 @@ function SessionLoading({
   onMenuPress,
   onProjectsPress,
 }: {
-  onMenuPress: () => void
-  onProjectsPress: () => void
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
 }) {
-  const insets = useSafeAreaInsets()
-  const [textValue, setTextValue] = useState('')
+  const insets = useSafeAreaInsets();
+  const [textValue, setTextValue] = useState('');
 
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
@@ -395,7 +429,9 @@ function SessionLoading({
       />
       <TabBar activeTab="session" onTabChange={() => {}} />
       <View className="flex-1 items-center justify-center px-8">
-        <Text className="text-stone-400 dark:text-stone-600 text-sm text-center">Loading session...</Text>
+        <Text className="text-center text-sm text-stone-400 dark:text-stone-600">
+          Loading session...
+        </Text>
       </View>
       <VoiceInputArea
         textValue={textValue}
@@ -410,5 +446,5 @@ function SessionLoading({
         providerName="Build"
       />
     </View>
-  )
+  );
 }

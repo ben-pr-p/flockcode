@@ -8,11 +8,12 @@
 ## Architecture Overview
 
 ```
-React Native (Expo 54) ──WebSocket (Cap'n Web RPC)──▶ Hono Server (Bun) ──SDK──▶ OpenCode Server
+React Native (Expo 54) ──HTTP API + SSE (Durable Streams)──▶ Hono Server (Bun) ──SDK──▶ OpenCode Server
 ```
 
 - **Monorepo**: `packages/native` (iOS app) + `packages/server` (API bridge)
-- **State**: Jotai atoms (local) + RPC targets (server-synced)
+- **State**: Jotai atoms (local) + Durable Streams / TanStack DB live queries (server-synced)
+- **Mutations**: Plain HTTP POST endpoints (prompt, create session)
 - **Voice**: Audio recorded on device → sent to server → server transcribes via Gemini 3 Flash (with session context) → forwards text to OpenCode
 - **No auth**: Connects to trusted local/network OpenCode server
 
@@ -24,7 +25,7 @@ React Native (Expo 54) ──WebSocket (Cap'n Web RPC)──▶ Hono Server (Bun
 |------|--------|-------|
 | Chat UI (messages, tool calls) | ✅ Done | All message types render correctly |
 | Session/project browsing | ✅ Done | Sidebars, search, filtering all work |
-| RPC client ↔ server bridge | ✅ Done | Cap'n Web over WebSocket, promise pipelining |
+| HTTP API + live queries | ✅ Done | Durable Streams (SSE) for reads, HTTP endpoints for mutations |
 | Diff viewing | ✅ Mostly done | WebView-based with @pierre/diffs |
 | Settings screen UI | ✅ Mostly done | Missing recording timeout UI |
 | iPad split-pane layout | 🟡 Partial | Shell exists, tool detail panels are placeholders |
@@ -282,7 +283,7 @@ Three modes designed in requirements. **None are implemented.**
 
 | Test File | Tests | Status | Notes |
 |-----------|-------|--------|-------|
-| `capnweb.test.ts` | 13 | ✅ Working | Full RPC target hierarchy, HTTP + WebSocket |
+| ~~`capnweb.test.ts`~~ | — | Removed | Capnweb eliminated; replaced by HTTP endpoint tests |
 | `opencode.spec.ts` | 3 | ✅ Working | Zod schema validation against live data |
 | `index.test.ts` | 8 | 🟡 Partial | `beforeAll`/`afterAll` commented out; requires manual server setup |
 
@@ -349,7 +350,7 @@ Based on user input, here's the suggested implementation order:
 | `hooks/useSettings.ts` | Settings + connection | 🟡 Connection is fixture |
 | `hooks/useMusicPlayer.ts` | Music player | 🗑️ Remove |
 | `hooks/useLayout.ts` | iPad detection | ✅ Done |
-| `hooks/useRpcTarget.ts` | Generic RPC hook | ✅ Done |
+| ~~`hooks/useRpcTarget.ts`~~ | ~~Generic RPC hook~~ | Removed (capnweb eliminated) |
 | `state/settings.ts` | Settings atoms | 🟡 No persistence |
 | `state/ui.ts` | UI state atoms | ✅ Done |
 | `state/music.ts` | Music atoms | 🗑️ Remove |
@@ -358,7 +359,7 @@ Based on user input, here's the suggested implementation order:
 | File | Purpose | Status |
 |------|---------|--------|
 | `src/index.ts` | Server entry, routes | ✅ Done |
-| `src/rpc.ts` | RPC targets | 🟡 Event wiring incomplete, audio stub |
+| ~~`src/rpc.ts`~~ | ~~RPC targets~~ | Removed (capnweb eliminated; logic moved to HTTP endpoints in app.ts + prompt.ts) |
 | `src/types.ts` | Zod schemas | ✅ Done |
 | `src/opencode.ts` | OpenCode SDK wrapper | 🔴 Async bug in event streaming |
 | `src/diff-page/app.tsx` | Diff viewer React app | ✅ Done |

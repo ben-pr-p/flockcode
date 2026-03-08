@@ -1,4 +1,3 @@
-import { websocket } from "hono/bun"
 import { createApp } from "./app"
 import { parseArgs } from "util"
 import diffPage from "./diff-page/index.html"
@@ -24,5 +23,4 @@ export default {
     "/diff": diffPage,
   },
   fetch: app.fetch,
-  websocket,
 }

@@ -1,6 +1,6 @@
+import { useState, useEffect } from 'react'
 import { useAtomValue } from 'jotai'
-import { apiAtom } from '../lib/api'
-import { useRpcTarget } from './useRpcTarget'
+import { apiClientAtom } from '../lib/api'
 
 // UI ChangedFile type that components expect
 export interface ChangedFile {
@@ -10,35 +10,51 @@ export interface ChangedFile {
   removed: number
 }
 
+const POLL_INTERVAL = 2000
+
 export function useChanges(sessionId: string | undefined): { data: ChangedFile[]; isLoading: boolean } {
-  const api = useAtomValue(apiAtom)
+  const api = useAtomValue(apiClientAtom)
+  const [data, setData] = useState<ChangedFile[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const { data, isLoading } = useRpcTarget<ChangedFile[]>(
-    () => {
-      const handle = api.getSession(sessionId!)
-      const target = handle.changeList()
-      return {
-        async getState() {
-          const files = await target.getState()
-          return mapFiles(files)
-        },
+  useEffect(() => {
+    if (!sessionId) {
+      setData([])
+      setIsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    setIsLoading(true)
+
+    const load = async () => {
+      try {
+        const res = await api.api.sessions[':sessionId'].changes.$get({
+          param: { sessionId },
+        })
+        if (!res.ok) throw new Error('Failed to fetch changes')
+        const changes = await res.json()
+        if (!cancelled) {
+          setData(changes as ChangedFile[])
+          setIsLoading(false)
+        }
+      } catch (err) {
+        console.error('[useChanges] fetch failed:', err)
+        if (!cancelled) setIsLoading(false)
       }
-    },
-    [api, sessionId],
-  )
+    }
 
-  if (!sessionId) {
-    return { data: [], isLoading: false }
-  }
+    load()
 
-  return { data: data ?? [], isLoading }
-}
+    const interval = setInterval(() => {
+      if (!cancelled) load()
+    }, POLL_INTERVAL)
 
-function mapFiles(files: any[]): ChangedFile[] {
-  return files.map((f) => ({
-    path: f.path,
-    added: f.added,
-    removed: f.removed,
-    status: f.status,
-  }))
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [api, sessionId])
+
+  return { data, isLoading }
 }

@@ -1,12 +1,13 @@
+// Hono RPC client — type-safe API calls inferred from the server's route types.
+
 import { atom } from 'jotai';
-import { newHttpBatchRpcSession, newWebSocketRpcSession } from 'capnweb';
-import type { Api } from '../../server/src/rpc';
+import { hc } from 'hono/client';
+import type { AppType } from '../../server/src/app';
 import { debouncedServerUrlAtom } from '../state/settings';
 
-export type RpcApi = ReturnType<typeof newHttpBatchRpcSession<Api>>;
+export type ApiClient = ReturnType<typeof hc<AppType>>;
 
-export const apiAtom = atom<RpcApi>((get) => {
-  const serverUrl = get(debouncedServerUrlAtom);
-  const rpcUrl = serverUrl.replace(/\/$/, '') + '/rpc';
-  return newWebSocketRpcSession<Api>(rpcUrl);
+export const apiClientAtom = atom<ApiClient>((get) => {
+  const serverUrl = get(debouncedServerUrlAtom).replace(/\/$/, '');
+  return hc<AppType>(serverUrl);
 });

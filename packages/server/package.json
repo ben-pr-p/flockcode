@@ -8,14 +8,13 @@
     "build:diff-page": "bun build src/diff-page/index.html --outdir=src/diff-page/dist --minify"
   },
   "dependencies": {
-    "@hono/capnweb": "^0.1.0",
+    "@hono/zod-validator": "^0.7.6",
     "@opencode-ai/sdk": "^1.2.10",
     "@pierre/diffs": "^1.0.11",
     "@tanstack/ai": "^0.5.1",
     "@tanstack/ai-gemini": "^0.5.0",
-    "capnweb": "^0.5.0",
     "durable-streams-web-standard": "github:ben-pr-p/durable-streams-web-standard",
-    "hono": "^4.7.0",
+    "hono": "4.12.5",
     "nanoid": "^5.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

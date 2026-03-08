@@ -38,19 +38,27 @@ class StateStream {
       })
     }
 
-    // Load all sessions
-    const sessions = await this.#client.session.list()
-    for (const session of sessions.data ?? []) {
-      this.#appendEvent({
-        type: "session",
-        key: session.id,
-        value: mapSession(session),
-        headers: { operation: "insert" },
-      })
-    }
+    // Load each projects sessions in parallel
+    const projectSessions = await Promise.all(
+      projects.data?.map(async (project) => {
+        const res = await this.#client.session.list({ query: { directory: project.worktree } })
+
+        for (const session of res.data ?? []) {
+          this.#appendEvent({
+            type: "session",
+            key: session.id,
+            value: mapSession(session),
+            headers: { operation: "insert" },
+          })
+        }
+
+        return res.data ?? []
+      }) ?? []
+    )
+    const sessions = projectSessions.flat()
 
     // Load all messages for each session
-    for (const session of sessions.data ?? []) {
+    for (const session of sessions ?? []) {
       const msgs = await this.#client.session.messages({ path: { id: session.id } })
       for (const raw of msgs.data ?? []) {
         const msg = mapMessage(raw)
@@ -237,6 +245,7 @@ class StateStream {
 }
 
 function mapProject(raw: any) {
+  console.log('===== PROJECT =====')
   console.log(raw)
   return {
     id: raw.id,
@@ -251,6 +260,8 @@ function mapProject(raw: any) {
 }
 
 function mapSession(raw: any) {
+  console.log('===== SESSION =====')
+  console.log(raw)
   return {
     id: raw.id,
     title: raw.title,
