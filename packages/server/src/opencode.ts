@@ -3,23 +3,13 @@
 import {
   createOpencodeClient,
   Event as OpencodeEvent,
-  type EventMessageUpdated,
-  type EventMessageRemoved,
-  type EventMessagePartUpdated,
-  type EventMessagePartRemoved,
-  type EventPermissionUpdated,
-  type EventPermissionReplied,
-  type EventSessionStatus,
-  type EventSessionIdle,
-  type EventSessionCompacted,
-  type EventSessionCreated,
-  type EventSessionUpdated,
-  type EventSessionDeleted,
-  type EventSessionDiff,
-  type EventSessionError,
-  type EventTodoUpdated,
-  type EventCommandExecuted,
 } from "@opencode-ai/sdk"
+import type {
+  Message,
+  MessagePart,
+} from "./types"
+
+export type { OpencodeEvent }
 
 // Not exported from the v1 SDK types, but the server does emit this event
 export type EventMessagePartDelta = {
@@ -32,11 +22,6 @@ export type EventMessagePartDelta = {
     delta: string
   }
 }
-import { EventEmitter } from 'node:events';
-import type {
-  Message,
-  MessagePart,
-} from "./types"
 
 export type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
@@ -101,36 +86,25 @@ export function mapMessage(raw: any): Message {
   return msg
 }
 
+// --- Opencode class ---
+
+export type OpencodeEventCallback = (event: OpencodeEvent | EventMessagePartDelta) => void
+
 export class Opencode {
   #client: OpencodeClient
-  #listener: EventEmitter
 
   constructor(baseUrl: string) {
     this.#client = createOpencodeClient({ baseUrl })
-    this.#listener = new EventEmitter()
   }
 
-  async spawnListener() {
+  async spawnListener(callback: OpencodeEventCallback) {
     const events = await this.#client.event.subscribe()
     const forwardEvents = async () => {
       for await (const event of events.stream) {
-        const session = getSessionId(event)
-        if (session) {
-          this.#listener.emit(session.sessionId, session.event)
-          this.#listener.emit('*', session.event)
-        }
+        callback(event)
       }
     }
     forwardEvents()
-  }
-
-  addSessionListener(sessionId: string, fn: (event: SessionEvent) => void) {
-    this.#listener.on(sessionId, fn)
-  }
-
-  // Listen for all session events (any sessionId). Useful for session list updates.
-  addGlobalListener(fn: (event: SessionEvent) => void) {
-    this.#listener.on('*', fn)
   }
 
   async listProjects() {
@@ -148,53 +122,120 @@ export class Opencode {
   }
 }
 
-// Events that carry a sessionID directly in properties
-type DirectSessionEvent =
-  | EventMessageRemoved
-  | EventMessagePartDelta
-  | EventMessagePartRemoved
-  | EventPermissionUpdated
-  | EventPermissionReplied
-  | EventSessionStatus
-  | EventSessionIdle
-  | EventSessionCompacted
-  | EventSessionDiff
-  | EventSessionError
-  | EventTodoUpdated
-  | EventCommandExecuted
+// --- Exhaustive event handler ---
+// Translates every OpencodeEvent into the appropriate StateStream calls.
 
-// Events where sessionID is nested inside properties.info or properties.part
-type NestedSessionEvent =
-  | EventMessageUpdated       // properties.info.sessionID
-  | EventSessionCreated       // properties.info.id (info is a Session)
-  | EventSessionUpdated       // properties.info.id
-  | EventSessionDeleted       // properties.info.id
-  | EventMessagePartUpdated   // properties.part.sessionID
+export type StateStreamSink = {
+  sessionCreated(info: any): void
+  sessionUpdated(info: any): void
+  sessionDeleted(info: any): void
+  sessionStatus(sessionId: string): void
+  sessionIdle(sessionId: string): void
+  sessionCompacted(sessionId: string): void
+  sessionDiff(sessionId: string, diff: any[]): void
+  sessionError(sessionId: string | undefined, error: any): void
+  messageUpdated(info: any): void
+  messageRemoved(sessionId: string, messageId: string): void
+  messagePartUpdated(part: any): void
+  messagePartDelta(messageId: string, partId: string, field: string, delta: string): void
+  messagePartRemoved(sessionId: string, messageId: string, partId: string): void
+  permissionUpdated(permission: any): void
+  permissionReplied(sessionId: string, permissionId: string, response: string): void
+  todoUpdated(sessionId: string, todos: any[]): void
+  commandExecuted(sessionId: string, name: string, args: string, messageId: string): void
+}
 
-export type SessionEvent = DirectSessionEvent | NestedSessionEvent
+export function handleOpencodeEvent(
+  event: OpencodeEvent | EventMessagePartDelta,
+  sink: StateStreamSink,
+): void {
+  switch (event.type) {
+    // --- Session lifecycle ---
+    case "session.created":
+      return sink.sessionCreated(event.properties.info)
+    case "session.updated":
+      return sink.sessionUpdated(event.properties.info)
+    case "session.deleted":
+      return sink.sessionDeleted(event.properties.info)
+    case "session.status":
+      return sink.sessionStatus(event.properties.sessionID)
+    case "session.idle":
+      return sink.sessionIdle(event.properties.sessionID)
+    case "session.compacted":
+      return sink.sessionCompacted(event.properties.sessionID)
+    case "session.diff":
+      return sink.sessionDiff(event.properties.sessionID, event.properties.diff)
+    case "session.error":
+      return sink.sessionError(event.properties.sessionID, event.properties.error)
 
-export function getSessionId(event: OpencodeEvent): { sessionId: string; event: SessionEvent } | undefined {
-  const props = event.properties as any
+    // --- Messages ---
+    case "message.updated":
+      return sink.messageUpdated(event.properties.info)
+    case "message.removed":
+      return sink.messageRemoved(event.properties.sessionID, event.properties.messageID)
 
-  // Direct sessionID in properties
-  if ('sessionID' in props && typeof props.sessionID === 'string') {
-    return { sessionId: props.sessionID, event: event as DirectSessionEvent }
+    // --- Message parts ---
+    case "message.part.updated":
+      return sink.messagePartUpdated(event.properties.part)
+    case "message.part.delta":
+      return sink.messagePartDelta(
+        event.properties.messageID,
+        event.properties.partID,
+        event.properties.field,
+        event.properties.delta,
+      )
+    case "message.part.removed":
+      return sink.messagePartRemoved(
+        event.properties.sessionID,
+        event.properties.messageID,
+        event.properties.partID,
+      )
+
+    // --- Permissions ---
+    case "permission.updated":
+      return sink.permissionUpdated(event.properties)
+    case "permission.replied":
+      return sink.permissionReplied(
+        event.properties.sessionID,
+        event.properties.permissionID,
+        event.properties.response,
+      )
+
+    // --- Todos & commands ---
+    case "todo.updated":
+      return sink.todoUpdated(event.properties.sessionID, event.properties.todos)
+    case "command.executed":
+      return sink.commandExecuted(
+        event.properties.sessionID,
+        event.properties.name,
+        event.properties.arguments,
+        event.properties.messageID,
+      )
+
+    // --- Non-session events (no-ops for state stream) ---
+    case "server.instance.disposed":
+    case "server.connected":
+    case "installation.updated":
+    case "installation.update-available":
+    case "lsp.client.diagnostics":
+    case "lsp.updated":
+    case "file.edited":
+    case "file.watcher.updated":
+    case "vcs.branch.updated":
+    case "tui.prompt.append":
+    case "tui.command.execute":
+    case "tui.toast.show":
+    case "pty.created":
+    case "pty.updated":
+    case "pty.exited":
+    case "pty.deleted":
+      return
+
+    default: {
+      // Exhaustive check: if TypeScript complains here, a new event type
+      // was added to the SDK and needs to be handled above.
+      const _exhaustive: never = event
+      console.warn("Unhandled opencode event type:", (event as any).type)
+    }
   }
-
-  // session.created/updated/deleted: properties.info is a Session (use info.id)
-  if (event.type === 'session.created' || event.type === 'session.updated' || event.type === 'session.deleted') {
-    return { sessionId: props.info.id, event: event as NestedSessionEvent }
-  }
-
-  // message.updated: properties.info is a Message (has sessionID)
-  if (event.type === 'message.updated') {
-    return { sessionId: props.info.sessionID, event: event as EventMessageUpdated }
-  }
-
-  // message.part.updated: properties.part has sessionID
-  if (event.type === 'message.part.updated') {
-    return { sessionId: props.part.sessionID, event: event as EventMessagePartUpdated }
-  }
-
-  return undefined
 }

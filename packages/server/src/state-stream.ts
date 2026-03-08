@@ -1,8 +1,8 @@
 export { StateStream }
 
 import type { DurableStreamServer } from "durable-streams-web-standard"
-import type { OpencodeClient } from "./opencode"
-import { Opencode, mapMessage, mapPart, type SessionEvent } from "./opencode"
+import type { OpencodeClient, StateStreamSink } from "./opencode"
+import { mapMessage, mapPart } from "./opencode"
 import type { Message, MessagePart } from "./types"
 
 type StateEvent = {
@@ -12,16 +12,14 @@ type StateEvent = {
   headers: { operation: "insert" | "update" | "upsert" | "delete" }
 }
 
-class StateStream {
+class StateStream implements StateStreamSink {
   #ds: DurableStreamServer
   #client: OpencodeClient
-  #opencode: Opencode
   #messages: Map<string, Message> = new Map()
 
-  constructor(ds: DurableStreamServer, client: OpencodeClient, opencode: Opencode) {
+  constructor(ds: DurableStreamServer, client: OpencodeClient) {
     this.#ds = ds
     this.#client = client
-    this.#opencode = opencode
   }
 
   async initialize() {
@@ -71,128 +69,144 @@ class StateStream {
         })
       }
     }
-
-    // Subscribe to live events
-    this.#opencode.addGlobalListener((event) => this.#handleEvent(event))
   }
 
-  #handleEvent(event: SessionEvent) {
-    switch (event.type) {
-      case "session.created": {
-        const { info } = event.properties
-        return this.#appendEvent({
-          type: "session",
-          key: info.id,
-          value: mapSession(info),
-          headers: { operation: "insert" },
-        })
-      }
+  // --- StateStreamSink implementation ---
 
-      case "session.updated": {
-        const { info } = event.properties
-        return this.#appendEvent({
-          type: "session",
-          key: info.id,
-          value: mapSession(info),
-          headers: { operation: "update" },
-        })
-      }
+  sessionCreated(info: any) {
+    this.#appendEvent({
+      type: "session",
+      key: info.id,
+      value: mapSession(info),
+      headers: { operation: "insert" },
+    })
+  }
 
-      case "session.deleted": {
-        const { info } = event.properties
-        return this.#appendEvent({
-          type: "session",
-          key: info.id,
-          headers: { operation: "delete" },
-        })
-      }
+  sessionUpdated(info: any) {
+    this.#appendEvent({
+      type: "session",
+      key: info.id,
+      value: mapSession(info),
+      headers: { operation: "update" },
+    })
+  }
 
-      case "session.status":
-        return this.#refetchSession(event.properties.sessionID)
+  sessionDeleted(info: any) {
+    this.#appendEvent({
+      type: "session",
+      key: info.id,
+      headers: { operation: "delete" },
+    })
+  }
 
-      case "session.idle": {
-        const { sessionID } = event.properties
-        this.#refetchSession(sessionID)
-        return this.#fullMessageSync(sessionID)
-      }
+  sessionStatus(sessionId: string) {
+    this.#refetchSession(sessionId)
+  }
 
-      case "message.updated": {
-        const { info } = event.properties
-        const existing = this.#messages.get(info.id)
-        if (existing) {
-          existing.createdAt = info.time?.created ?? existing.createdAt
-          if (info.role === "assistant") {
-            existing.cost = info.cost
-            existing.tokens = info.tokens
-              ? { input: info.tokens.input, output: info.tokens.output, reasoning: info.tokens.reasoning }
-              : existing.tokens
-            existing.finish = info.finish
-          }
-        } else {
-          const msg: Message = {
-            id: info.id,
-            sessionId: info.sessionID,
-            role: info.role,
-            parts: [],
-            createdAt: info.time?.created ?? 0,
-            ...(info.role === "assistant" ? {
-              cost: info.cost,
-              tokens: info.tokens
-                ? { input: info.tokens.input, output: info.tokens.output, reasoning: info.tokens.reasoning }
-                : undefined,
-              finish: info.finish,
-            } : {}),
-          }
-          this.#messages.set(info.id, msg)
-        }
-        return this.#emitMessage(info.id)
-      }
+  sessionIdle(sessionId: string) {
+    this.#refetchSession(sessionId)
+    this.#fullMessageSync(sessionId)
+  }
 
-      case "message.part.updated": {
-        const { part } = event.properties
-        const msg = this.#messages.get(part.messageID)
-        if (!msg) return
-        const mapped = mapPart(part)
-        const idx = msg.parts.findIndex((p) => p.id === mapped.id)
-        if (idx >= 0) {
-          msg.parts[idx] = mapped
-        } else {
-          msg.parts.push(mapped)
-        }
-        return this.#emitMessage(part.messageID)
-      }
+  sessionCompacted(_sessionId: string) {
+    // No-op for now
+  }
 
-      case "message.part.delta": {
-        const { messageID, partID, field, delta } = event.properties
-        const msg = this.#messages.get(messageID)
-        if (!msg) return
-        const part = msg.parts.find((p) => p.id === partID)
-        if (part && field === "text" && "text" in part) {
-          ;(part as { text: string }).text = (part.text ?? "") + delta
-          return this.#emitMessage(messageID)
-        }
-        return
-      }
+  sessionDiff(_sessionId: string, _diff: any[]) {
+    // No-op for now
+  }
 
-      case "message.removed": {
-        const { messageID } = event.properties
-        this.#messages.delete(messageID)
-        return this.#appendEvent({
-          type: "message",
-          key: messageID,
-          headers: { operation: "delete" },
-        })
-      }
+  sessionError(_sessionId: string | undefined, _error: any) {
+    // No-op for now
+  }
 
-      case "message.part.removed": {
-        const { messageID, partID } = event.properties
-        const msg = this.#messages.get(messageID)
-        if (!msg) return
-        msg.parts = msg.parts.filter((p) => p.id !== partID)
-        return this.#emitMessage(messageID)
+  messageUpdated(info: any) {
+    const existing = this.#messages.get(info.id)
+    if (existing) {
+      existing.createdAt = info.time?.created ?? existing.createdAt
+      if (info.role === "assistant") {
+        existing.cost = info.cost
+        existing.tokens = info.tokens
+          ? { input: info.tokens.input, output: info.tokens.output, reasoning: info.tokens.reasoning }
+          : existing.tokens
+        existing.finish = info.finish
       }
+    } else {
+      const msg: Message = {
+        id: info.id,
+        sessionId: info.sessionID,
+        role: info.role,
+        parts: [],
+        createdAt: info.time?.created ?? 0,
+        ...(info.role === "assistant" ? {
+          cost: info.cost,
+          tokens: info.tokens
+            ? { input: info.tokens.input, output: info.tokens.output, reasoning: info.tokens.reasoning }
+            : undefined,
+          finish: info.finish,
+        } : {}),
+      }
+      this.#messages.set(info.id, msg)
+    }
+    this.#emitMessage(info.id)
+  }
+
+  messageRemoved(_sessionId: string, messageId: string) {
+    this.#messages.delete(messageId)
+    this.#appendEvent({
+      type: "message",
+      key: messageId,
+      headers: { operation: "delete" },
+    })
+  }
+
+  messagePartUpdated(part: any) {
+    const msg = this.#messages.get(part.messageID)
+    if (!msg) return
+    const mapped = mapPart(part)
+    const idx = msg.parts.findIndex((p) => p.id === mapped.id)
+    if (idx >= 0) {
+      msg.parts[idx] = mapped
+    } else {
+      msg.parts.push(mapped)
+    }
+    this.#emitMessage(part.messageID)
+  }
+
+  messagePartDelta(messageId: string, partId: string, field: string, delta: string) {
+    const msg = this.#messages.get(messageId)
+    if (!msg) return
+    const part = msg.parts.find((p) => p.id === partId)
+    if (part && field === "text" && "text" in part) {
+      ;(part as { text: string }).text = (part.text ?? "") + delta
+      this.#emitMessage(messageId)
     }
   }
+
+  messagePartRemoved(_sessionId: string, messageId: string, partId: string) {
+    const msg = this.#messages.get(messageId)
+    if (!msg) return
+    msg.parts = msg.parts.filter((p) => p.id !== partId)
+    this.#emitMessage(messageId)
+  }
+
+  permissionUpdated(_permission: any) {
+    // No-op for now
+  }
+
+  permissionReplied(_sessionId: string, _permissionId: string, _response: string) {
+    // No-op for now
+  }
+
+  todoUpdated(_sessionId: string, _todos: any[]) {
+    // No-op for now
+  }
+
+  commandExecuted(_sessionId: string, _name: string, _args: string, _messageId: string) {
+    // No-op for now
+  }
+
+  // --- Internal helpers ---
 
   #emitMessage(messageId: string) {
     const msg = this.#messages.get(messageId)

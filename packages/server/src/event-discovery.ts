@@ -6,7 +6,7 @@
 // Requires: opencode server running on localhost:4096
 
 import { createOpencodeClient, type Event as OpencodeEvent } from "@opencode-ai/sdk"
-import { getSessionId, mapMessage } from "./opencode"
+import { mapMessage } from "./opencode"
 
 const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
 
@@ -30,8 +30,13 @@ async function subscribeToEvents(targetSessionId: string): Promise<() => void> {
   const loop = async () => {
     for await (const event of subscription.stream) {
       if (!running) break
-      const parsed = getSessionId(event)
-      const sessionId = parsed?.sessionId
+      const props = event.properties as any
+      const sessionId: string | undefined =
+        props.sessionID ??
+        props.info?.sessionID ??
+        props.info?.id ??
+        props.part?.sessionID ??
+        undefined
 
       // Only collect events for our target session
       if (sessionId !== targetSessionId) continue
@@ -46,7 +51,6 @@ async function subscribeToEvents(targetSessionId: string): Promise<() => void> {
       events.push(collected)
 
       // Print event in real-time
-      const props = event.properties as any
       const summary = summarizeEvent(event)
       console.log(`[EVENT ${collected.index}] ${event.type} ${summary}`)
     }

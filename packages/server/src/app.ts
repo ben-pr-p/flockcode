@@ -3,7 +3,7 @@ import { DurableStreamServer } from "durable-streams-web-standard"
 import { customAlphabet } from "nanoid"
 import { z } from "zod/v4"
 import { zValidator } from "@hono/zod-validator"
-import { createClient, Opencode } from "./opencode"
+import { createClient, Opencode, handleOpencodeEvent } from "./opencode"
 import { StateStream } from "./state-stream"
 import { sendPrompt } from "./prompt"
 import { logger } from 'hono/logger'
@@ -24,18 +24,20 @@ const PromptPartsSchema = z.object({
 export function createApp(opencodeUrl: string) {
   const client = createClient(opencodeUrl)
   const opencode = new Opencode(opencodeUrl)
-  opencode.spawnListener().catch((err) => {
-    console.error("Failed to start opencode event listener:", err)
-  })
 
   // Unique instance ID for this server boot — clients use this to detect restarts
   const instanceId = generateInstanceId()
 
   // Single durable stream server for state protocol events
   const ds = new DurableStreamServer()
-  const stateStream = new StateStream(ds, client, opencode)
+  const stateStream = new StateStream(ds, client)
   stateStream.initialize().catch((err) => {
     console.error("Failed to initialize state stream:", err)
+  })
+
+  // Subscribe to opencode events and route them to the state stream
+  opencode.spawnListener((event) => handleOpencodeEvent(event, stateStream)).catch((err) => {
+    console.error("Failed to start opencode event listener:", err)
   })
 
   const app = new Hono()

@@ -8,14 +8,13 @@
 
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { Opencode, mapMessage } from "./opencode"
-import type { Message } from "./types"
+import type { OpencodeEventCallback } from "./opencode"
 
 const OPENCODE_URL = "http://localhost:4096"
 
 async function main() {
   const client = createOpencodeClient({ baseUrl: OPENCODE_URL })
   const opencode = new Opencode(OPENCODE_URL)
-  await opencode.spawnListener()
 
   // Create a fresh session
   console.log("Creating session...")
@@ -26,10 +25,11 @@ async function main() {
 
   // Track events received
   let eventCount = 0
-  opencode.addSessionListener(sessionId, (event) => {
+  const onEvent: OpencodeEventCallback = (event) => {
     eventCount++
     console.log(`[Event #${eventCount}] ${event.type}`)
-  })
+  }
+  await opencode.spawnListener(onEvent)
 
   // Send prompt directly via SDK
   console.log("\n--- Sending prompt ---")
