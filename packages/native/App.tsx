@@ -1,5 +1,5 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, Animated, PanResponder } from 'react-native';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { View, Pressable, Animated, PanResponder } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,24 +16,27 @@ import { useSettings } from './hooks/useSettings';
 import { useLayout } from './hooks/useLayout';
 import { useStateQuery, type ProjectValue } from './lib/stream-db';
 import { apiAtom } from './lib/api';
-import { newSessionWorktreeAtom } from './state/ui';
+import { newSessionProjectIdAtom } from './state/ui';
 
 export default function App() {
   const { isTabletLandscape, width: screenWidth } = useLayout();
   const sidebarWidth = screenWidth * 0.85;
   const router = useRouter();
-  const params = useLocalSearchParams<{ worktree?: string; sessionId?: string }>();
+  const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>();
 
   const sessionId = params.sessionId;
-  const worktree = params.worktree;
+  const projectId = params.projectId;
   const { data: rawProjects } = useStateQuery(
     (db, q) => q.from({ projects: db.collections.projects }),
   );
-  const projects = (rawProjects as ProjectValue[] | undefined)
-    ?.slice()
-    .sort((a, b) => b.time.created - a.time.created) ?? [];
+  const projects = useMemo(() =>
+    (rawProjects as ProjectValue[] | undefined)
+      ?.slice()
+      .sort((a, b) => b.time.created - a.time.created) ?? [],
+    [rawProjects],
+  );
   const api = useAtomValue(apiAtom);
-  const [newSessionWorktree, setNewSessionWorktree] = useAtom(newSessionWorktreeAtom);
+  const [newSessionProjectId, setNewSessionProjectId] = useAtom(newSessionProjectIdAtom);
 
   // Settings (only used for phone layout; iPad handles settings in left panel)
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -170,82 +173,82 @@ export default function App() {
   }, []);
 
   const navigateToProject = useCallback(
-    async (wt: string) => {
-      const sessionListTarget = api.sessionList(wt);
+    async (pid: string) => {
       try {
-        const sessions = await sessionListTarget.getState();
+        const projectHandle = await api.getProject(pid);
+        const sessions = await projectHandle.listSessions();
         if (sessions.length > 0) {
           router.push({
-            pathname: '/projects/[worktree]/sessions/[sessionId]',
-            params: { worktree: wt, sessionId: sessions[0].id },
+            pathname: '/projects/[projectId]/sessions/[sessionId]',
+            params: { projectId: pid, sessionId: sessions[0].id },
           });
           return;
         }
       } catch {}
-      router.push({ pathname: '/projects/[worktree]', params: { worktree: wt } });
+      router.push({ pathname: '/projects/[projectId]', params: { projectId: pid } });
     },
     [api, router]
   );
 
   const handleSelectProject = useCallback(
-    (wt: string) => {
-      navigateToProject(wt);
+    (pid: string) => {
+      navigateToProject(pid);
       closeRightSidebar();
     },
     [navigateToProject, closeRightSidebar]
   );
 
   const handleSelectSession = useCallback(
-    (sessionId: string, wt: string) => {
-      setNewSessionWorktree(null);
+    (sid: string, pid: string) => {
+      setNewSessionProjectId(null);
       router.push({
-        pathname: '/projects/[worktree]/sessions/[sessionId]',
-        params: { worktree: wt, sessionId },
+        pathname: '/projects/[projectId]/sessions/[sessionId]',
+        params: { projectId: pid, sessionId: sid },
       });
       closeLeftSidebar();
     },
-    [router, closeLeftSidebar, setNewSessionWorktree]
+    [router, closeLeftSidebar, setNewSessionProjectId]
   );
 
   const handleNewSession = useCallback(() => {
-    if (!worktree) return;
-    // If already in new-session mode for this worktree, just close the sidebar
-    if (newSessionWorktree === worktree && !sessionId) {
+    if (!projectId) return;
+    // If already in new-session mode for this project, just close the sidebar
+    if (newSessionProjectId === projectId && !sessionId) {
       closeLeftSidebar();
       return;
     }
-    setNewSessionWorktree(worktree);
+    setNewSessionProjectId(projectId);
     // Navigate to the project route (no sessionId) so the new session view shows
-    router.push({ pathname: '/projects/[worktree]', params: { worktree } });
+    router.push({ pathname: '/projects/[projectId]', params: { projectId } });
     closeLeftSidebar();
-  }, [worktree, newSessionWorktree, sessionId, setNewSessionWorktree, router, closeLeftSidebar]);
+  }, [projectId, newSessionProjectId, sessionId, setNewSessionProjectId, router, closeLeftSidebar]);
 
   const handleNewSessionCreated = useCallback(
-    (newSessionId: string, wt: string) => {
-      setNewSessionWorktree(null);
+    (newSessionId: string, pid: string) => {
+      setNewSessionProjectId(null);
       router.push({
-        pathname: '/projects/[worktree]/sessions/[sessionId]',
-        params: { worktree: wt, sessionId: newSessionId },
+        pathname: '/projects/[projectId]/sessions/[sessionId]',
+        params: { projectId: pid, sessionId: newSessionId },
       });
     },
-    [router, setNewSessionWorktree]
+    [router, setNewSessionProjectId]
   );
 
   // Clear new-session placeholder when navigating to an actual session
   useEffect(() => {
-    if (sessionId && newSessionWorktree) {
-      setNewSessionWorktree(null);
+    if (sessionId && newSessionProjectId) {
+      setNewSessionProjectId(null);
     }
-  }, [sessionId, newSessionWorktree, setNewSessionWorktree]);
+  }, [sessionId, newSessionProjectId, setNewSessionProjectId]);
 
   // Auto-navigate to the most recent project on initial load
   const hasAutoNavigated = useRef(false);
   useEffect(() => {
-    if (hasAutoNavigated.current || sessionId || worktree) return;
+    if (hasAutoNavigated.current || sessionId || projectId) return;
     if (projects.length === 0) return;
     hasAutoNavigated.current = true;
-    navigateToProject(projects[0].worktree);
-  }, [projects, sessionId, worktree, navigateToProject]);
+    navigateToProject(projects[0].id);
+  }, [projects, sessionId, projectId, navigateToProject]);
 
   return (
     <SafeAreaProvider>
@@ -272,9 +275,9 @@ export default function App() {
             onProjectsPress={openRightSidebar}
             settings={settings}
           />
-        ) : newSessionWorktree ? (
+        ) : newSessionProjectId ? (
           <NewSessionContent
-            worktree={newSessionWorktree}
+            projectId={newSessionProjectId}
             isTabletLandscape={isTabletLandscape}
             onMenuPress={openLeftSidebar}
             onProjectsPress={openRightSidebar}
@@ -302,7 +305,7 @@ export default function App() {
               className="absolute bottom-0 left-0 top-0"
               style={{ width: sidebarWidth, transform: [{ translateX: leftSlideAnim }] }}>
               <SessionsSidebar
-                worktree={worktree}
+                projectId={projectId}
                 selectedSessionId={params.sessionId ?? null}
                 onClose={closeLeftSidebar}
                 onNewSession={handleNewSession}
@@ -333,7 +336,7 @@ export default function App() {
               className="absolute bottom-0 right-0 top-0"
               style={{ width: sidebarWidth, transform: [{ translateX: rightSlideAnim }] }}>
               <ProjectsSidebar
-                selectedWorktree={worktree ?? null}
+                selectedProjectId={projectId ?? null}
                 onClose={closeRightSidebar}
                 onAddProject={() => {}}
                 onSelectProject={handleSelectProject}

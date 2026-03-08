@@ -8,12 +8,12 @@ import { MusicPlayerBar } from './MusicPlayerBar';
 import { useStateQuery, type ProjectValue } from '../lib/stream-db';
 
 interface ProjectsSidebarProps {
-  selectedWorktree: string | null;
+  selectedProjectId: string | null;
   onClose: () => void;
   onAddProject: () => void;
-  onSelectProject: (worktree: string) => void;
-  onNewSession: (worktree: string) => void;
-  onOverflow: (worktree: string) => void;
+  onSelectProject: (projectId: string) => void;
+  onNewSession: (projectId: string) => void;
+  onOverflow: (projectId: string) => void;
   musicPlayer: {
     track: { name: string; artist: string; albumArtUri: string; durationMs: number } | null;
     isPlaying: boolean;
@@ -28,7 +28,7 @@ interface ProjectsSidebarProps {
 }
 
 export function ProjectsSidebar({
-  selectedWorktree,
+  selectedProjectId,
   onClose,
   onAddProject,
   onSelectProject,
@@ -128,7 +128,7 @@ export function ProjectsSidebar({
               key={project.id}
               project={project}
               index={index}
-              isSelected={project.worktree === selectedWorktree}
+              isSelected={project.id === selectedProjectId}
               onPress={onSelectProject}
               onOverflow={onOverflow}
             />

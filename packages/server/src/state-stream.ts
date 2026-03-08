@@ -229,7 +229,7 @@ class StateStream {
   }
 
   #appendEvent(event: StateEvent) {
-    console.log('Appending ', event)
+    // console.log('Appending ', event)
     this.#ds.appendToStream("/", JSON.stringify(event), {
       contentType: "application/json",
     })
@@ -237,6 +237,7 @@ class StateStream {
 }
 
 function mapProject(raw: any) {
+  console.log(raw)
   return {
     id: raw.id,
     worktree: raw.worktree,

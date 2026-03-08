@@ -112,21 +112,27 @@ function flattenServerMessage(msg: Message): UIMessage[] {
 
   for (const part of msg.parts) {
     switch (part.type) {
-      case 'text':
-        messages.push({
-          id: part.id,
-          sessionId: msg.sessionId,
-          role: msg.role,
-          type: 'text',
-          content: part.text,
-          audioUri: null,
-          transcription: null,
-          toolName: null,
-          toolMeta: null,
-          syncStatus: 'synced',
-          createdAt: msg.createdAt,
-        });
+      case 'text': {
+        const prev = messages[messages.length - 1];
+        if (prev && prev.type === 'text' && prev.role === msg.role) {
+          prev.content += '\n' + part.text;
+        } else {
+          messages.push({
+            id: part.id,
+            sessionId: msg.sessionId,
+            role: msg.role,
+            type: 'text',
+            content: part.text,
+            audioUri: null,
+            transcription: null,
+            toolName: null,
+            toolMeta: null,
+            syncStatus: 'synced',
+            createdAt: msg.createdAt,
+          });
+        }
         break;
+      }
       case 'tool':
         messages.push({
           id: part.id,

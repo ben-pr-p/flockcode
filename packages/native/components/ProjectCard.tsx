@@ -6,8 +6,8 @@ interface ProjectCardProps {
   project: Project
   index: number
   isSelected: boolean
-  onPress: (worktree: string) => void
-  onOverflow: (worktree: string) => void
+  onPress: (projectId: string) => void
+  onOverflow: (projectId: string) => void
 }
 
 export function ProjectCard({
@@ -24,7 +24,7 @@ export function ProjectCard({
 
   return (
     <Pressable
-      onPress={() => onPress(project.worktree)}
+      onPress={() => onPress(project.id)}
       className={`rounded-xl p-4 gap-2.5 ${
         isSelected
           ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700'
@@ -47,7 +47,7 @@ export function ProjectCard({
           </Text>
         </View>
 
-        <Pressable onPress={() => onOverflow(project.worktree)} hitSlop={8}>
+        <Pressable onPress={() => onOverflow(project.id)} hitSlop={8}>
           <Text className="text-stone-500 text-base">···</Text>
         </Pressable>
       </View>
@@ -55,7 +55,7 @@ export function ProjectCard({
       {/* Stats row */}
       <View className="flex-row items-center gap-3">
         <Text className="text-[11px] text-stone-500" style={{ fontFamily: 'JetBrains Mono' }}>
-          {formatRelativeTime(lastActiveAt)}
+          {project.id.slice(0, 4)} · {formatRelativeTime(lastActiveAt)}
         </Text>
       </View>
 

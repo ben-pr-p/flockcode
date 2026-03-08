@@ -464,6 +464,17 @@ export class ProjectHandle extends RpcTarget {
     if (res.error) throw new Error("Failed to create session")
     return new SessionHandle(this.#client, res.data!.id, this.#opencode, onSessionStateChanged)
   }
+
+  async createSessionWithPrompt(opts: { parts: PromptPartInput[] }): Promise<{ sessionId: string }> {
+    const createRes = await this.#client.session.create({
+      query: { directory: this.#project.worktree },
+    })
+    if (createRes.error) throw new Error("Failed to create session")
+    const sessionId = createRes.data!.id
+    const handle = new SessionHandle(this.#client, sessionId, this.#opencode)
+    await handle.prompt(opts.parts)
+    return { sessionId }
+  }
 }
 
 // ---------------------------------------------------------------------------

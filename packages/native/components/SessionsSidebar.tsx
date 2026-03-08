@@ -4,15 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle } from 'lucide-react-native';
 import { useMemo } from 'react';
-import { eq } from '@tanstack/react-db';
 import { useStateQuery, type SessionValue } from '../lib/stream-db';
 
 interface SessionsSidebarProps {
-  worktree: string | undefined;
+  projectId: string | undefined;
   selectedSessionId: string | null;
   onClose: () => void;
   onNewSession: () => void;
-  onSelectSession: (sessionId: string, worktree: string) => void;
+  onSelectSession: (sessionId: string, projectId: string) => void;
   onOverflowSession?: (id: string) => void;
   onSettingsPress: () => void;
   onMicPress: () => void;
@@ -20,7 +19,7 @@ interface SessionsSidebarProps {
 }
 
 export function SessionsSidebar({
-  worktree,
+  projectId,
   selectedSessionId,
   onClose,
   onNewSession,
@@ -62,9 +61,9 @@ export function SessionsSidebar({
       {/* Divider */}
       <View className="h-px bg-stone-200 dark:bg-stone-800" />
 
-      {worktree ? (
+      {projectId ? (
         <SessionListContent
-          worktree={worktree}
+          projectId={projectId}
           selectedSessionId={selectedSessionId}
           onSelectSession={onSelectSession}
           onOverflowSession={onOverflowSession}
@@ -104,7 +103,7 @@ export function SessionsSidebar({
 interface SessionRowProps {
   session: SessionValue;
   isSelected: boolean;
-  onPress: (sessionId: string, worktree: string) => void;
+  onPress: (sessionId: string, projectId: string) => void;
   onOverflow?: (id: string) => void;
 }
 
@@ -114,7 +113,7 @@ function SessionRow({ session, isSelected, onPress, onOverflow }: SessionRowProp
 
   return (
     <Pressable
-      onPress={() => onPress(session.id, session.directory)}
+      onPress={() => onPress(session.id, session.projectID)}
       className={`flex-row items-center gap-3 rounded-lg px-3.5 py-3 ${
         isSelected
           ? 'border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30'
@@ -143,29 +142,31 @@ function SessionRow({ session, isSelected, onPress, onOverflow }: SessionRowProp
 }
 
 function SessionListContent({
-  worktree,
+  projectId,
   selectedSessionId,
   onSelectSession,
   onOverflowSession,
 }: {
-  worktree: string;
+  projectId: string;
   selectedSessionId: string | null;
-  onSelectSession: (sessionId: string, worktree: string) => void;
+  onSelectSession: (sessionId: string, projectId: string) => void;
   onOverflowSession?: (id: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: sessions } = useStateQuery(
+  const { data: allSessions } = useStateQuery(
     (db, q) => q.from({ sessions: db.collections.sessions }),
-    // .where(({ sessions }) => eq(sessions.directory, worktree)),
-    [worktree]
   );
 
   const filteredSessions = useMemo(() => {
-    return searchQuery.length > 0
-      ? sessions?.filter((s) => s.title.toLowerCase().includes(searchQuery.toLowerCase()))
-      : sessions;
-  }, [searchQuery, sessions]);
+    const byProject = (allSessions as SessionValue[] | undefined)?.filter(
+      (s) => s.projectID === projectId,
+    );
+    if (!searchQuery) return byProject;
+    return byProject?.filter((s) =>
+      s.title.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+  }, [allSessions, projectId, searchQuery]);
 
   const { colorScheme } = useColorScheme();
   const searchIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';

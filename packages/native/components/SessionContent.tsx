@@ -286,16 +286,16 @@ function ExistingSessionDataLoader({
 // navigating to the real session.
 
 interface NewSessionContentProps {
-  worktree: string
+  projectId: string
   isTabletLandscape: boolean
   onMenuPress: () => void
   onProjectsPress: () => void
-  onSessionCreated: (sessionId: string, worktree: string) => void
+  onSessionCreated: (sessionId: string, projectId: string) => void
   settings: SessionSettings
 }
 
 export function NewSessionContent({
-  worktree,
+  projectId,
   isTabletLandscape,
   onMenuPress,
   onProjectsPress,
@@ -306,14 +306,22 @@ export function NewSessionContent({
   // Guard against multiple simultaneous session creations
   const creatingRef = useRef(false)
 
-  const projectName = worktree.split('/').pop() || worktree
+  // Look up the project to get worktree for display name
+  const { data: projectResults } = useStateQuery(
+    (db, q) =>
+      q.from({ projects: db.collections.projects })
+        .where(({ projects }) => eq(projects.id, projectId)),
+    [projectId],
+  )
+  const project = (projectResults as import('../lib/stream-db').ProjectValue[] | undefined)?.[0]
+  const worktree = project?.worktree ?? ''
 
   const now = Date.now()
   const placeholderSession: SessionValue = {
     id: 'new',
     title: 'New Session',
     directory: worktree,
-    projectID: '',
+    projectID: projectId,
     version: '',
     time: { created: now, updated: now },
   }
@@ -324,17 +332,15 @@ export function NewSessionContent({
       creatingRef.current = true
 
       try {
-        const { sessionId } = await api.createSessionWithPrompt({
-          directory: worktree,
-          parts,
-        })
-        onSessionCreated(sessionId, worktree)
+        const projectHandle = await api.getProject(projectId)
+        const { sessionId } = await projectHandle.createSessionWithPrompt({ parts })
+        onSessionCreated(sessionId, projectId)
       } catch (err) {
         console.error('[NewSessionContent] createSessionWithPrompt failed:', err)
         creatingRef.current = false
       }
     },
-    [api, worktree, onSessionCreated],
+    [api, projectId, onSessionCreated],
   )
 
   const handleSendText = useCallback(async (text: string) => {
