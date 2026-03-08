@@ -3,7 +3,9 @@ import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle } from 'lucide-react-native';
-import { useSidebarSessions, type SidebarSession } from '../hooks/useSidebarSessions';
+import { useMemo } from 'react';
+import { eq } from '@tanstack/react-db';
+import { useStateQuery, type SessionValue } from '../lib/stream-db';
 
 interface SessionsSidebarProps {
   worktree: string | undefined;
@@ -44,7 +46,11 @@ export function SessionsSidebar({
           <Menu size={20} color={iconColor} />
         </Pressable>
 
-        <Text className="text-lg font-semibold text-stone-900 dark:text-stone-50" style={{ fontFamily: 'JetBrains Mono' }}>Sessions</Text>
+        <Text
+          className="text-lg font-semibold text-stone-900 dark:text-stone-50"
+          style={{ fontFamily: 'JetBrains Mono' }}>
+          Sessions
+        </Text>
 
         <Pressable
           onPress={onNewSession}
@@ -73,7 +79,7 @@ export function SessionsSidebar({
 
       {/* Bottom bar */}
       <View
-        className="flex-row items-center justify-between px-5 pt-3 border-t border-stone-200 dark:border-stone-800"
+        className="flex-row items-center justify-between border-t border-stone-200 px-5 pt-3 dark:border-stone-800"
         style={{
           paddingBottom: Math.max(insets.bottom, 28),
         }}>
@@ -96,34 +102,35 @@ export function SessionsSidebar({
 }
 
 interface SessionRowProps {
-  session: SidebarSession;
+  session: SessionValue;
   isSelected: boolean;
   onPress: (sessionId: string, worktree: string) => void;
   onOverflow?: (id: string) => void;
 }
 
 function SessionRow({ session, isSelected, onPress, onOverflow }: SessionRowProps) {
-  const isActive = session.status === 'active';
   const { colorScheme } = useColorScheme();
   const overflowColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
 
   return (
     <Pressable
-      onPress={() => onPress(session.id, session.worktree)}
+      onPress={() => onPress(session.id, session.directory)}
       className={`flex-row items-center gap-3 rounded-lg px-3.5 py-3 ${
-        isSelected ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700' : ''
+        isSelected
+          ? 'border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30'
+          : ''
       }`}>
-      <View className={`h-2 w-2 rounded-full ${isActive ? 'bg-green-500' : 'bg-stone-400 dark:bg-stone-600'}`} />
+      <View className="h-2 w-2 rounded-full bg-stone-400 dark:bg-stone-600" />
       <View className="flex-1 gap-0.5">
         <Text
-          className={`text-sm font-medium ${
-            isActive ? 'text-stone-900 dark:text-stone-50' : 'text-stone-700 dark:text-stone-400'
-          }`}
+          className="text-sm font-medium text-stone-700 dark:text-stone-400"
           style={{ fontFamily: 'JetBrains Mono' }}>
-          {session.name}
+          {session.title}
         </Text>
-        <Text className="text-[11px] text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>
-          {session.projectName} · {session.relativeTime}
+        <Text
+          className="text-[11px] text-stone-400 dark:text-stone-600"
+          style={{ fontFamily: 'JetBrains Mono' }}>
+          {formatRelativeTime(session.time.updated)}
         </Text>
       </View>
       {isSelected && onOverflow && (
@@ -147,7 +154,19 @@ function SessionListContent({
   onOverflowSession?: (id: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const { data: sessions } = useSidebarSessions(worktree, searchQuery);
+
+  const { data: sessions } = useStateQuery(
+    (db, q) => q.from({ sessions: db.collections.sessions }),
+    // .where(({ sessions }) => eq(sessions.directory, worktree)),
+    [worktree]
+  );
+
+  const filteredSessions = useMemo(() => {
+    return searchQuery.length > 0
+      ? sessions?.filter((s) => s.title.toLowerCase().includes(searchQuery.toLowerCase()))
+      : sessions;
+  }, [searchQuery, sessions]);
+
   const { colorScheme } = useColorScheme();
   const searchIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const placeholderColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
@@ -156,7 +175,7 @@ function SessionListContent({
     <>
       {/* Search */}
       <View className="px-5 pb-3 pt-1">
-        <View className="h-11 flex-row items-center gap-2.5 rounded-lg bg-white dark:bg-stone-900 px-3.5">
+        <View className="h-11 flex-row items-center gap-2.5 rounded-lg bg-white px-3.5 dark:bg-stone-900">
           <Search size={16} color={searchIconColor} />
           <TextInput
             value={searchQuery}
@@ -177,7 +196,7 @@ function SessionListContent({
         className="flex-1"
         contentContainerStyle={{ padding: 12, gap: 2 }}
         showsVerticalScrollIndicator={false}>
-        {sessions.recent.map((session) => (
+        {(filteredSessions ?? []).map((session) => (
           <SessionRow
             key={session.id}
             session={session}
@@ -187,7 +206,7 @@ function SessionListContent({
           />
         ))}
 
-        {sessions.earlier.length > 0 && (
+        {/*{sessions.earlier.length > 0 && (
           <>
             <View className="px-3.5 pb-1 pt-4">
               <Text
@@ -206,8 +225,20 @@ function SessionListContent({
               />
             ))}
           </>
-        )}
+        )}*/}
       </ScrollView>
     </>
   );
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
 }
