@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { View, ScrollView } from 'react-native'
+import { View, ScrollView, Keyboard } from 'react-native'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ToolOutputBlock } from './ToolOutputBlock'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
@@ -27,12 +27,24 @@ export function ChatThread({ messages, onToolCallPress }: ChatThreadProps) {
     }
   }, [messages.length])
 
+  // Auto-scroll to end when keyboard appears
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true })
+      }, 100)
+    })
+    return () => sub.remove()
+  }, [])
+
   return (
     <ScrollView
       ref={scrollRef}
       className="flex-1"
       contentContainerStyle={{ padding: 16, gap: 12 }}
       showsVerticalScrollIndicator={false}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
     >
       {messages.map((message) => {
         switch (message.type) {

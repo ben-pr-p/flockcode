@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { View, Text, Pressable, Modal } from 'react-native'
+import { View, Text, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
 import { Menu, FolderOpen, Settings, X } from 'lucide-react-native'
@@ -174,7 +174,11 @@ export function SplitLayout({
         </View>
 
         {/* Right panel — always shows chat (~50%) */}
-        <View className="flex-1">
+        <KeyboardAvoidingView
+          className="flex-1"
+          behavior="padding"
+          keyboardVerticalOffset={insets.top + 48 + 32}
+        >
           <TabBar activeTab={activeTab} onTabChange={handleTabChange} />
           <ChatThread messages={messages} onToolCallPress={handleToolCallPress} />
           <VoiceInputArea
@@ -195,7 +199,7 @@ export function SplitLayout({
             modelName="Sonnet"
             providerName="Build"
           />
-        </View>
+        </KeyboardAvoidingView>
       </View>
 
       {/* Settings modal — centered overlay on iPad */}

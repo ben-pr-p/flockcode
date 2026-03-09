@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { View, Text } from 'react-native'
+import { View, Text, KeyboardAvoidingView, Platform } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { SessionHeader } from './SessionHeader'
 import { TabBar } from './TabBar'
@@ -50,7 +50,12 @@ export function SessionScreen({
   const [textValue, setTextValue] = useState('')
 
   return (
-    <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
+    <KeyboardAvoidingView
+      className="flex-1 bg-stone-50 dark:bg-stone-950"
+      style={{ paddingTop: insets.top }}
+      behavior="padding"
+      keyboardVerticalOffset={0}
+    >
       <SessionHeader
         projectName={session.directory ? session.directory.split('/').pop() || session.directory : ''}
         branchName={session.title || 'Untitled'}
@@ -89,7 +94,7 @@ export function SessionScreen({
         modelName="Sonnet"
         providerName="Build"
       />
-    </View>
+    </KeyboardAvoidingView>
   )
 }
 
