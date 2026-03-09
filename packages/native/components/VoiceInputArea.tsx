@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react'
+import React, { useCallback } from 'react'
 import { View, Text, Pressable, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
@@ -40,34 +40,13 @@ export function VoiceInputArea({
   const micIconColor = isDark ? '#0C0A09' : '#FAFAF9'
   const selectorColor = isDark ? '#57534E' : '#A8A29E'
 
-  // Tap: starts recording, locked on — tap again to stop.
-  // Hold (>300ms): starts recording — release to stop.
-  const pressInTimeRef = useRef(0)
-  const [locked, setLocked] = useState(false)
-
+  // Hold to record — release to stop and send.
   const handlePressIn = useCallback(() => {
-    if (recordingState === 'recording' && locked) {
-      // Tap to stop locked recording
-      setLocked(false)
-      onMicPressOut()
-      return
-    }
-
-    pressInTimeRef.current = Date.now()
     onMicPressIn()
-  }, [recordingState, locked, onMicPressIn, onMicPressOut])
+  }, [onMicPressIn])
 
   const handlePressOut = useCallback(() => {
     if (recordingState !== 'recording') return
-
-    const holdDuration = Date.now() - pressInTimeRef.current
-    if (holdDuration < 300) {
-      // Quick tap — lock recording on, user will tap again to stop
-      setLocked(true)
-      return
-    }
-
-    // Long hold — release to stop
     onMicPressOut()
   }, [recordingState, onMicPressOut])
 
@@ -119,7 +98,7 @@ export function VoiceInputArea({
           <ChevronDown size={12} color={selectorColor} />
         </Pressable>
 
-        {/* Mic button — tap to lock record, hold to record */}
+        {/* Mic button — hold to record, release to send */}
         <Pressable
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
@@ -149,7 +128,7 @@ export function VoiceInputArea({
           className="text-center text-xs text-stone-500 dark:text-stone-400 mt-1 mb-1"
           style={{ fontFamily: 'JetBrains Mono' }}
         >
-          {locked ? 'recording · tap to send' : 'recording · release to send'}
+          {'recording · release to send'}
         </Text>
       )}
     </View>
