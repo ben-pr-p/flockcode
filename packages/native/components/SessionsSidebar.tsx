@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin } from 'lucide-react-native';
@@ -123,16 +123,8 @@ function SessionRow({ session, isSelected, isPinned, onPress, onOverflow, onTogg
   const pinColor = colorScheme === 'dark' ? '#D97706' : '#B45309';
 
   const handleLongPress = useCallback(() => {
-    const action = isPinned ? 'Unpin' : 'Pin';
-    Alert.alert(
-      `${action} Session`,
-      `${action} "${session.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: action, onPress: () => onTogglePin(session.id) },
-      ],
-    );
-  }, [isPinned, session.id, session.title, onTogglePin]);
+    onTogglePin(session.id);
+  }, [session.id, onTogglePin]);
 
   return (
     <Pressable
@@ -145,20 +137,19 @@ function SessionRow({ session, isSelected, isPinned, onPress, onOverflow, onTogg
           ? 'border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30'
           : ''
       }`}>
-      {hasChildren ? (
-        <Pressable onPress={onToggleExpand} hitSlop={8}>
+      {/* Status dot — always visible */}
+      <View className="h-2 w-2 rounded-full bg-stone-400 dark:bg-stone-600" />
+      {/* Metadata icons */}
+      {isPinned && <Pin size={12} color={pinColor} className="-ml-1" />}
+      {isSubSession && <GitBranch size={12} color={subSessionIconColor} className="-ml-1" />}
+      {hasChildren && (
+        <Pressable onPress={onToggleExpand} hitSlop={8} className="-ml-1">
           {isExpanded ? (
             <ChevronDown size={14} color={chevronColor} />
           ) : (
             <ChevronRight size={14} color={chevronColor} />
           )}
         </Pressable>
-      ) : isPinned ? (
-        <Pin size={12} color={pinColor} />
-      ) : isSubSession ? (
-        <GitBranch size={12} color={subSessionIconColor} />
-      ) : (
-        <View className="h-2 w-2 rounded-full bg-stone-400 dark:bg-stone-600" />
       )}
       <View className="flex-1 gap-0.5">
         <Text
@@ -172,7 +163,7 @@ function SessionRow({ session, isSelected, isPinned, onPress, onOverflow, onTogg
           {formatRelativeTime(session.time.updated)}
         </Text>
       </View>
-      {isSelected && onOverflow && (
+      {onOverflow && (
         <Pressable onPress={() => onOverflow(session.id)} hitSlop={8}>
           <Ellipsis size={16} color={overflowColor} />
         </Pressable>
