@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { View, Pressable, Animated, PanResponder } from 'react-native';
+import { View, Pressable, Animated, PanResponder, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -15,7 +15,7 @@ import { useSettings } from './hooks/useSettings';
 import { useLayout } from './hooks/useLayout';
 import { useStateQuery, type ProjectValue } from './lib/stream-db';
 import { apiClientAtom } from './lib/api';
-import { newSessionProjectIdAtom } from './state/ui';
+import { newSessionProjectIdAtom, pinnedSessionIdsAtom } from './state/ui';
 
 export default function App() {
   const { isTabletLandscape, width: screenWidth } = useLayout();
@@ -36,6 +36,7 @@ export default function App() {
   );
   const api = useAtomValue(apiClientAtom);
   const [newSessionProjectId, setNewSessionProjectId] = useAtom(newSessionProjectIdAtom);
+  const [pinnedSessionIds, setPinnedSessionIds] = useAtom(pinnedSessionIdsAtom);
 
   // Settings (only used for phone layout; iPad handles settings in left panel)
   const [settingsVisible, setSettingsVisible] = useState(false);
@@ -213,6 +214,72 @@ export default function App() {
     [router, closeLeftSidebar, setNewSessionProjectId]
   );
 
+  const resolvedPinnedIds = pinnedSessionIds instanceof Promise ? [] : pinnedSessionIds;
+
+  const handleDeleteSession = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await api.api.sessions[':sessionId'].$delete({
+          param: { sessionId: sid },
+        });
+        if (!res.ok) {
+          Alert.alert('Error', 'Failed to delete session.');
+          return;
+        }
+        // If we just deleted the active session, navigate away
+        if (sid === sessionId && projectId) {
+          router.push({ pathname: '/projects/[projectId]', params: { projectId } });
+          setNewSessionProjectId(projectId);
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to delete session.');
+      }
+    },
+    [api, sessionId, projectId, router, setNewSessionProjectId],
+  );
+
+  const handleOverflowSession = useCallback(
+    (sid: string) => {
+      const isPinned = resolvedPinnedIds.includes(sid);
+      Alert.alert(
+        'Session Options',
+        undefined,
+        [
+          {
+            text: isPinned ? 'Unpin Session' : 'Pin Session',
+            onPress: () => {
+              if (isPinned) {
+                setPinnedSessionIds(resolvedPinnedIds.filter((id: string) => id !== sid));
+              } else {
+                setPinnedSessionIds([...resolvedPinnedIds, sid]);
+              }
+            },
+          },
+          {
+            text: 'Delete Session',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                'Delete Session',
+                'This will permanently delete the session and all its data. This cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => handleDeleteSession(sid),
+                  },
+                ],
+              );
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+    },
+    [resolvedPinnedIds, setPinnedSessionIds, handleDeleteSession],
+  );
+
   const handleNewSession = useCallback(() => {
     if (!projectId) return;
     // If already in new-session mode for this project, just close the sidebar
@@ -228,13 +295,17 @@ export default function App() {
 
   const handleNewSessionCreated = useCallback(
     (newSessionId: string, pid: string) => {
-      setNewSessionProjectId(null);
+      // Navigate first, then clear the atom. If we clear the atom first,
+      // the component tree re-renders with no sessionId and no newSessionProjectId,
+      // briefly showing EmptySession and potentially losing the navigation.
+      // The useEffect cleanup at line 241 will clear newSessionProjectId once
+      // the router has set the sessionId param.
       router.push({
         pathname: '/projects/[projectId]/sessions/[sessionId]',
         params: { projectId: pid, sessionId: newSessionId },
       });
     },
-    [router, setNewSessionProjectId]
+    [router]
   );
 
   // Clear new-session placeholder when navigating to an actual session
@@ -243,6 +314,18 @@ export default function App() {
       setNewSessionProjectId(null);
     }
   }, [sessionId, newSessionProjectId, setNewSessionProjectId]);
+
+  // Alert the user if expo-updates rolled back due to a crash in a previous OTA update
+  useEffect(() => {
+    if (settings.isEmergencyLaunch) {
+      Alert.alert(
+        'Update Rolled Back',
+        'The last OTA update crashed on launch and was automatically rolled back. ' +
+        'The app is running the previous working version. ' +
+        'Check the published update for errors before re-publishing.',
+      );
+    }
+  }, [settings.isEmergencyLaunch]);
 
   // Auto-navigate to the most recent project on initial load
   const hasAutoNavigated = useRef(false);
@@ -313,7 +396,7 @@ export default function App() {
                 onClose={closeLeftSidebar}
                 onNewSession={handleNewSession}
                 onSelectSession={handleSelectSession}
-                onOverflowSession={() => {}}
+                onOverflowSession={handleOverflowSession}
                 onSettingsPress={openSettings}
                 onMicPress={() => {}}
                 onHelpPress={() => {}}

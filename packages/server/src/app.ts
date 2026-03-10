@@ -118,13 +118,14 @@ export function createApp(opencodeUrl: string) {
         }
         const sessionId = createRes.data!.id
 
-        // Send the first prompt
-        try {
-          await sendPrompt(client, sessionId, parts, project.worktree)
-        } catch (err: any) {
-          console.error("[POST /api/projects/:projectId/sessions] prompt failed:", err)
-          // Session was created but prompt failed — still return the sessionId
-        }
+        // Fire the prompt in the background — don't block the response.
+        // The client navigates to the session immediately and sees streaming
+        // updates via the SSE durable stream.
+        sendPrompt(client, sessionId, parts, project.worktree).catch(
+          (err: any) => {
+            console.error("[POST /api/projects/:projectId/sessions] prompt failed:", err)
+          },
+        )
 
         return c.json({ sessionId })
       },
@@ -171,6 +172,33 @@ export function createApp(opencodeUrl: string) {
         return c.json({ error: `File not found: ${file}` }, 404)
       }
       return c.json({ file: match.file as string, before: match.before as string, after: match.after as string })
+    })
+
+    // Delete a session permanently
+    .delete("/sessions/:sessionId", async (c) => {
+      const sessionId = c.req.param("sessionId")
+      try {
+        // Look up the session to get its directory for the SDK call
+        const sessionRes = await client.session.get({ path: { id: sessionId } })
+        const directory = (sessionRes.data as any)?.directory as string | undefined
+
+        const res = await client.session.delete({
+          path: { id: sessionId },
+          ...(directory ? { query: { directory } } : {}),
+        })
+        if (res.error) {
+          return c.json({ error: "Failed to delete session" }, 500)
+        }
+
+        // Push the deletion through the durable stream immediately so
+        // connected clients see it without waiting for the SSE event.
+        stateStream.sessionDeleted({ id: sessionId })
+
+        return c.json({ success: true })
+      } catch (err: any) {
+        console.error("[DELETE /api/sessions/:sessionId]", err)
+        return c.json({ error: err.message ?? "Delete failed" }, 500)
+      }
     })
 
     // Returns all file diffs for a session
