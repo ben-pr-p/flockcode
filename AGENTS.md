@@ -53,9 +53,10 @@ Push JS/asset updates to TestFlight builds without re-submitting to App Store.
 
 ```sh
 cd packages/native
-eas update --branch main --message "Your update message"
+eas update --branch production --message "Your update message"
 ```
 
+- The `--branch` must match the channel name in `eas.json` (e.g. `production` channel → `production` branch)
 - No cloud build required — uploads JS bundle and assets to Expo servers
 - Uses EAS credits (free tier available, then paid)
 - Only works for JS/asset changes, not native code

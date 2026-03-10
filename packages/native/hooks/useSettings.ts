@@ -50,6 +50,10 @@ export function useSettings() {
     ? `${nativeVersion} (${updateId.slice(0, 8)})`
     : nativeVersion
 
+  // Detect if expo-updates rolled back due to a crash in a previous update.
+  // When true, the update was automatically reverted to the previously working version.
+  const isEmergencyLaunch = Updates.isEmergencyLaunch
+
   return {
     serverUrl,
     setServerUrl,
@@ -60,6 +64,7 @@ export function useSettings() {
     setNotificationSound,
     notificationSoundOptions: NOTIFICATION_SOUND_OPTIONS,
     appVersion,
+    isEmergencyLaunch,
     defaultModel: FIXTURE_SETTINGS.defaultModel,
   }
 }
