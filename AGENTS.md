@@ -61,6 +61,22 @@ eas update --branch main --message "Your update message"
 - Only works for JS/asset changes, not native code
 - New TestFlight builds reset OTA state (users get the new binary)
 
+## GitHub CLI
+
+The `gh` CLI is installed via Homebrew. Use the full path since it may not be on the default `$PATH`:
+
+```sh
+/opt/homebrew/bin/gh
+```
+
+Use this for issue management, PR creation, and other GitHub operations. The repo is `ben-pr-p/mobile-code`.
+
+```sh
+/opt/homebrew/bin/gh issue list --repo ben-pr-p/mobile-code
+/opt/homebrew/bin/gh issue create --repo ben-pr-p/mobile-code --title "Title" --body "Body"
+/opt/homebrew/bin/gh issue close 123 --repo ben-pr-p/mobile-code --reason completed
+```
+
 ## Conventions
 
 - **iOS only** — no Android support. Do not add Android-specific code or configurations.
