@@ -2,7 +2,7 @@
   "expo": {
     "name": "mobilecode",
     "slug": "mobilecode",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
