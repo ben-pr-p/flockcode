@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin } from 'lucide-react-native';
 import { useMemo, useCallback } from 'react';
 import { useAtom } from 'jotai/react';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
 import { useStateQuery, type SessionValue } from '../lib/stream-db';
 import { pinnedSessionIdsAtom } from '../state/ui';
 
@@ -102,10 +103,49 @@ export function SessionsSidebar({
   );
 }
 
+function SessionStatusDot({ status }: { status: SessionValue['status'] }) {
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    if (status === 'busy') {
+      opacity.value = withRepeat(
+        withTiming(0.4, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
+    } else {
+      opacity.value = withTiming(1, { duration: 200 });
+    }
+  }, [status, opacity]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  const colorClass =
+    status === 'busy'
+      ? 'bg-green-500'
+      : status === 'error'
+        ? 'bg-red-500'
+        : 'bg-stone-400 dark:bg-stone-600';
+
+  if (status === 'busy') {
+    return (
+      <Animated.View
+        style={animatedStyle}
+        className={`h-2 w-2 rounded-full ${colorClass}`}
+      />
+    );
+  }
+
+  return <View className={`h-2 w-2 rounded-full ${colorClass}`} />;
+}
+
 interface SessionRowProps {
   session: SessionValue;
   isSelected: boolean;
   isPinned: boolean;
+  sessionStatus: SessionValue['status'];
   onPress: (sessionId: string, projectId: string) => void;
   onOverflow?: (id: string) => void;
   onTogglePin: (id: string) => void;
@@ -115,7 +155,7 @@ interface SessionRowProps {
   isSubSession?: boolean;
 }
 
-function SessionRow({ session, isSelected, isPinned, onPress, onOverflow, onTogglePin, hasChildren, isExpanded, onToggleExpand, isSubSession }: SessionRowProps) {
+function SessionRow({ session, isSelected, isPinned, sessionStatus, onPress, onOverflow, onTogglePin, hasChildren, isExpanded, onToggleExpand, isSubSession }: SessionRowProps) {
   const { colorScheme } = useColorScheme();
   const overflowColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const chevronColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
@@ -138,7 +178,7 @@ function SessionRow({ session, isSelected, isPinned, onPress, onOverflow, onTogg
           : ''
       }`}>
       {/* Status dot — always visible */}
-      <View className="h-2 w-2 rounded-full bg-stone-400 dark:bg-stone-600" />
+      <SessionStatusDot status={sessionStatus} />
       {/* Metadata icons */}
       {isPinned && <Pin size={12} color={pinColor} className="-ml-1" />}
       {isSubSession && <GitBranch size={12} color={subSessionIconColor} className="-ml-1" />}
@@ -336,6 +376,7 @@ function SessionListContent({
               session={node.session}
               isSelected={node.session.id === selectedSessionId}
               isPinned={pinnedSet.has(node.session.id)}
+              sessionStatus={node.session.status}
               onPress={onSelectSession}
               onOverflow={onOverflowSession}
               onTogglePin={togglePin}
@@ -350,6 +391,7 @@ function SessionListContent({
                   session={child}
                   isSelected={child.id === selectedSessionId}
                   isPinned={pinnedSet.has(child.id)}
+                  sessionStatus={child.status}
                   onPress={onSelectSession}
                   onOverflow={onOverflowSession}
                   onTogglePin={togglePin}

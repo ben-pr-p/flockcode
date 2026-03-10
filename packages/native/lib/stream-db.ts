@@ -40,6 +40,8 @@ type SessionValue = {
   summary?: { additions: number; deletions: number; files: number };
   share?: { url: string };
   time: { created: number; updated: number };
+  status: 'idle' | 'busy' | 'error';
+  error?: string;
 };
 
 type ChangeValue = {

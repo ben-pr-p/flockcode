@@ -12,11 +12,15 @@ type StateEvent = {
   headers: { operation: "insert" | "update" | "upsert" | "delete" }
 }
 
+type SessionStatus = "idle" | "busy" | "error"
+
 class StateStream implements StateStreamSink {
   #ds: DurableStreamServer
   #client: OpencodeClient
   #messages: Map<string, Message> = new Map()
   #sessionDirectories: Map<string, string> = new Map()
+  #sessionStatuses: Map<string, { status: SessionStatus; error?: string }> = new Map()
+  #lastEmittedSessions: Map<string, any> = new Map()
 
   constructor(ds: DurableStreamServer, client: OpencodeClient) {
     this.#ds = ds
@@ -46,12 +50,7 @@ class StateStream implements StateStreamSink {
           if ((session as any).directory) {
             this.#sessionDirectories.set(session.id, (session as any).directory)
           }
-          this.#appendEvent({
-            type: "session",
-            key: session.id,
-            value: mapSession(session),
-            headers: { operation: "insert" },
-          })
+          this.#emitSession(session.id, mapSession(session), "insert")
         }
 
         return res.data ?? []
@@ -86,26 +85,18 @@ class StateStream implements StateStreamSink {
 
   sessionCreated(info: any) {
     if (info.directory) this.#sessionDirectories.set(info.id, info.directory)
-    this.#appendEvent({
-      type: "session",
-      key: info.id,
-      value: mapSession(info),
-      headers: { operation: "insert" },
-    })
+    this.#emitSession(info.id, mapSession(info), "insert")
   }
 
   sessionUpdated(info: any) {
     if (info.directory) this.#sessionDirectories.set(info.id, info.directory)
-    this.#appendEvent({
-      type: "session",
-      key: info.id,
-      value: mapSession(info),
-      headers: { operation: "update" },
-    })
+    this.#emitSession(info.id, mapSession(info), "update")
   }
 
   sessionDeleted(info: any) {
     this.#sessionDirectories.delete(info.id)
+    this.#sessionStatuses.delete(info.id)
+    this.#lastEmittedSessions.delete(info.id)
     this.#appendEvent({
       type: "session",
       key: info.id,
@@ -113,12 +104,14 @@ class StateStream implements StateStreamSink {
     })
   }
 
-  sessionStatus(sessionId: string) {
-    this.#refetchSession(sessionId)
+  sessionStatus(sessionId: string, status: { type: "idle" } | { type: "busy" } | { type: "retry"; attempt: number; message: string; next: number }) {
+    // Map retry to busy for the client — the session is still working
+    const clientStatus: SessionStatus = status.type === "retry" ? "busy" : status.type
+    this.#setSessionStatus(sessionId, clientStatus)
   }
 
   sessionIdle(sessionId: string) {
-    this.#refetchSession(sessionId)
+    this.#setSessionStatus(sessionId, "idle")
     this.#fullMessageSync(sessionId)
     this.#refetchChanges(sessionId)
   }
@@ -136,8 +129,11 @@ class StateStream implements StateStreamSink {
     })
   }
 
-  sessionError(_sessionId: string | undefined, _error: any) {
-    // No-op for now
+  sessionError(sessionId: string | undefined, error: any) {
+    if (!sessionId) return
+    const message = typeof error === "string" ? error
+      : error?.data?.message ?? error?.message ?? "Unknown error"
+    this.#setSessionStatus(sessionId, "error", message)
   }
 
   messageUpdated(info: any) {
@@ -167,6 +163,14 @@ class StateStream implements StateStreamSink {
         } : {}),
       }
       this.#messages.set(info.id, msg)
+    }
+    // If we're receiving an assistant message without a finish signal,
+    // the session is actively working — mark it busy if not already
+    if (info.role === "assistant" && !info.finish) {
+      const current = this.#sessionStatuses.get(info.sessionID)
+      if (!current || current.status !== "busy") {
+        this.#setSessionStatus(info.sessionID, "busy")
+      }
     }
     this.#emitMessage(info.id)
   }
@@ -239,19 +243,29 @@ class StateStream implements StateStreamSink {
     })
   }
 
-  async #refetchSession(sessionId: string) {
-    try {
-      const directory = this.#sessionDirectories.get(sessionId)
-      const res = await this.#client.session.get({ path: { id: sessionId }, ...(directory ? { query: { directory } } : {}) })
-      if (res.data) {
-        this.#appendEvent({
-          type: "session",
-          key: sessionId,
-          value: mapSession(res.data),
-          headers: { operation: "update" },
-        })
-      }
-    } catch {}
+  #emitSession(sessionId: string, sessionData: any, operation: "insert" | "update") {
+    const statusInfo = this.#sessionStatuses.get(sessionId)
+    const value = {
+      ...sessionData,
+      status: statusInfo?.status ?? "idle",
+      ...(statusInfo?.error ? { error: statusInfo.error } : {}),
+    }
+    this.#lastEmittedSessions.set(sessionId, sessionData)
+    this.#appendEvent({
+      type: "session",
+      key: sessionId,
+      value,
+      headers: { operation },
+    })
+  }
+
+  #setSessionStatus(sessionId: string, status: SessionStatus, error?: string) {
+    this.#sessionStatuses.set(sessionId, { status, ...(error ? { error } : {}) })
+    // Re-emit the session with the updated status using the last known session data
+    const lastSession = this.#lastEmittedSessions.get(sessionId)
+    if (lastSession) {
+      this.#emitSession(sessionId, lastSession, "update")
+    }
   }
 
   async #fullMessageSync(sessionId: string) {

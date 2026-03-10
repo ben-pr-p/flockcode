@@ -150,7 +150,7 @@ export type StateStreamSink = {
   sessionCreated(info: any): void
   sessionUpdated(info: any): void
   sessionDeleted(info: any): void
-  sessionStatus(sessionId: string): void
+  sessionStatus(sessionId: string, status: { type: "idle" } | { type: "busy" } | { type: "retry"; attempt: number; message: string; next: number }): void
   sessionIdle(sessionId: string): void
   sessionCompacted(sessionId: string): void
   sessionDiff(sessionId: string, diff: any[]): void
@@ -179,7 +179,7 @@ export function handleOpencodeEvent(
     case "session.deleted":
       return sink.sessionDeleted(event.properties.info)
     case "session.status":
-      return sink.sessionStatus(event.properties.sessionID)
+      return sink.sessionStatus(event.properties.sessionID, (event.properties as any).status ?? { type: "busy" })
     case "session.idle":
       return sink.sessionIdle(event.properties.sessionID)
     case "session.compacted":
