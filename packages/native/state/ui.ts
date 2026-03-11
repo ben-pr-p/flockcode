@@ -15,6 +15,7 @@ export const rightSidebarOpenAtom = atom(false)
 
 // Search
 export const projectSearchQueryAtom = atom('')
+export const projectFilterAtom = atom<string | null>(null) // null = "All"
 export const sessionSearchQueryAtom = atom('')
 
 // Active tab
