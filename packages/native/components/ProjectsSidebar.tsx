@@ -139,39 +139,41 @@ export function ProjectsSidebar({
 
       {/* Filter chips */}
       {groups.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 }}>
-          {groups.map((group) => {
-            const isActive = group.prefix === validFilter;
-            return (
-              <Pressable
-                key={group.prefix ?? '__all'}
-                onPress={() => setActiveFilter(group.prefix)}
-                className={`h-8 items-center justify-center rounded-full px-4 ${
-                  isActive
-                    ? 'bg-amber-100 dark:bg-amber-900/40'
-                    : 'bg-white dark:bg-stone-900'
-                }`}
-                style={
-                  isActive
-                    ? { borderWidth: 1, borderColor: colorScheme === 'dark' ? '#B45309' : '#F59E0B' }
-                    : undefined
-                }>
-                <Text
-                  className={`text-xs font-medium ${
+        <View style={{ flexShrink: 0 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 8 }}>
+            {groups.map((group) => {
+              const isActive = group.prefix === validFilter;
+              return (
+                <Pressable
+                  key={group.prefix ?? '__all'}
+                  onPress={() => setActiveFilter(group.prefix)}
+                  className={`h-8 items-center justify-center rounded-full px-4 ${
                     isActive
-                      ? 'text-amber-700 dark:text-amber-400'
-                      : 'text-stone-600 dark:text-stone-400'
+                      ? 'bg-amber-100 dark:bg-amber-900/40'
+                      : 'bg-white dark:bg-stone-900'
                   }`}
-                  style={{ fontFamily: 'JetBrains Mono' }}>
-                  {group.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+                  style={
+                    isActive
+                      ? { borderWidth: 1, borderColor: colorScheme === 'dark' ? '#B45309' : '#F59E0B' }
+                      : undefined
+                  }>
+                  <Text
+                    className={`text-xs font-medium ${
+                      isActive
+                        ? 'text-amber-700 dark:text-amber-400'
+                        : 'text-stone-600 dark:text-stone-400'
+                    }`}
+                    style={{ fontFamily: 'JetBrains Mono' }}>
+                    {group.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
 
       {/* Projects list */}
