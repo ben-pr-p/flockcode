@@ -1,3 +1,23 @@
+diff --git a/node_modules/streamdown-rn/.bun-tag-767f84b6703c56f8 b/.bun-tag-767f84b6703c56f8
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/core/splitter/logger.js b/dist/core/splitter/logger.js
+index d342ff6745c0fd74eda4248590d96043c0555361..07c9ffdee3d36c848828ca8eac8834a1754b8515 100644
+--- a/dist/core/splitter/logger.js
++++ b/dist/core/splitter/logger.js
+@@ -1,11 +1,6 @@
+ const LOG_PREFIX = '[streamdown-rn]';
+ export const logDebug = (...args) => {
+-    const inDev = typeof __DEV__ !== 'undefined'
+-        ? __DEV__
+-        : typeof process !== 'undefined'
+-            ? process.env.NODE_ENV !== 'production'
+-            : true;
+-    if (!inDev)
++    if (!globalThis.__STREAMDOWN_DEBUG)
+         return;
+     if (typeof console !== 'undefined' && console.log) {
+         console.log(LOG_PREFIX, ...args);
 diff --git a/dist/renderers/ASTRenderer.js b/dist/renderers/ASTRenderer.js
 index 90c835be97d40c140d0c96e2cfb87d59fef9bd54..d631d46cebb322a701c442322e8f3726433f4a12 100644
 --- a/dist/renderers/ASTRenderer.js
@@ -20,6 +40,25 @@ index 90c835be97d40c140d0c96e2cfb87d59fef9bd54..d631d46cebb322a701c442322e8f3726
            {renderChildren(node, theme, componentRegistry, isStreaming)}
          </Text>);
          }
+diff --git a/src/core/splitter/logger.ts b/src/core/splitter/logger.ts
+index 25d79dfddf2162e1f77fbac12de1e0890e3d6e3f..d327b4937e5c57fecd515cc4d2cdaa9b9d4e8c46 100644
+--- a/src/core/splitter/logger.ts
++++ b/src/core/splitter/logger.ts
+@@ -3,13 +3,7 @@ declare const __DEV__: boolean | undefined;
+ const LOG_PREFIX = '[streamdown-rn]';
+ 
+ export const logDebug = (...args: unknown[]) => {
+-  const inDev =
+-    typeof __DEV__ !== 'undefined'
+-      ? __DEV__
+-      : typeof process !== 'undefined'
+-      ? process.env.NODE_ENV !== 'production'
+-      : true;
+-  if (!inDev) return;
++  if (!(globalThis as any).__STREAMDOWN_DEBUG) return;
+   if (typeof console !== 'undefined' && console.log) {
+     console.log(LOG_PREFIX, ...args);
+   }
 diff --git a/src/renderers/ASTRenderer.tsx b/src/renderers/ASTRenderer.tsx
 index dc6b4be75e63d4e29349bab0eff476ea7ec9ce00..94b0a30abd84781f022b270c81c7d230d78b78b7 100644
 --- a/src/renderers/ASTRenderer.tsx
