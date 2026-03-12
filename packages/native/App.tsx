@@ -17,7 +17,7 @@ import { useLayout } from './hooks/useLayout';
 import { useStateQuery, type ProjectValue } from './lib/stream-db';
 import { apiClientAtom } from './lib/api';
 import { ModelSelectorSheet } from './components/ModelSelectorSheet';
-import { newSessionProjectIdAtom, pinnedSessionIdsAtom } from './state/ui';
+import { newSessionProjectIdAtom } from './state/ui';
 
 export default function App() {
   const { isTabletLandscape, width: screenWidth } = useLayout();
@@ -38,8 +38,6 @@ export default function App() {
   );
   const api = useAtomValue(apiClientAtom);
   const [newSessionProjectId, setNewSessionProjectId] = useAtom(newSessionProjectIdAtom);
-  const [pinnedSessionIds, setPinnedSessionIds] = useAtom(pinnedSessionIdsAtom);
-
   // Settings (only used for phone layout; iPad handles settings in left panel)
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [settingsModelSelectorVisible, setSettingsModelSelectorVisible] = useState(false);
@@ -239,72 +237,6 @@ export default function App() {
     [router, closeLeftSidebar, setNewSessionProjectId]
   );
 
-  const resolvedPinnedIds = pinnedSessionIds instanceof Promise ? [] : pinnedSessionIds;
-
-  const handleDeleteSession = useCallback(
-    async (sid: string) => {
-      try {
-        const res = await api.api.sessions[':sessionId'].$delete({
-          param: { sessionId: sid },
-        });
-        if (!res.ok) {
-          Alert.alert('Error', 'Failed to delete session.');
-          return;
-        }
-        // If we just deleted the active session, navigate away
-        if (sid === sessionId && projectId) {
-          router.push({ pathname: '/projects/[projectId]', params: { projectId } });
-          setNewSessionProjectId(projectId);
-        }
-      } catch {
-        Alert.alert('Error', 'Failed to delete session.');
-      }
-    },
-    [api, sessionId, projectId, router, setNewSessionProjectId],
-  );
-
-  const handleOverflowSession = useCallback(
-    (sid: string) => {
-      const isPinned = resolvedPinnedIds.includes(sid);
-      Alert.alert(
-        'Session Options',
-        undefined,
-        [
-          {
-            text: isPinned ? 'Unpin Session' : 'Pin Session',
-            onPress: () => {
-              if (isPinned) {
-                setPinnedSessionIds(resolvedPinnedIds.filter((id: string) => id !== sid));
-              } else {
-                setPinnedSessionIds([...resolvedPinnedIds, sid]);
-              }
-            },
-          },
-          {
-            text: 'Delete Session',
-            style: 'destructive',
-            onPress: () => {
-              Alert.alert(
-                'Delete Session',
-                'This will permanently delete the session and all its data. This cannot be undone.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => handleDeleteSession(sid),
-                  },
-                ],
-              );
-            },
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-      );
-    },
-    [resolvedPinnedIds, setPinnedSessionIds, handleDeleteSession],
-  );
-
   const handleNewSession = useCallback(() => {
     if (!projectId) return;
     // If already in new-session mode for this project, just close the sidebar
@@ -433,7 +365,6 @@ export default function App() {
                 onClose={closeLeftSidebar}
                 onNewSession={handleNewSession}
                 onSelectSession={handleSelectSession}
-                onOverflowSession={handleOverflowSession}
                 onSettingsPress={openSettings}
                 onMicPress={() => {}}
                 onHelpPress={() => {}}

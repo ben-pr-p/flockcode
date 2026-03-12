@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin, Archive, ArchiveRestore } from 'lucide-react-native';
 import { useMemo, useCallback } from 'react';
-import { useAtom } from 'jotai/react';
+import { useAtom, useSetAtom } from 'jotai/react';
 import { useAtomValue } from 'jotai/react';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useStateQuery, useAppStateQuery, type SessionValue, type SessionMetaValue } from '../lib/stream-db';
-import { pinnedSessionIdsAtom } from '../state/ui';
+import { pinnedSessionIdsAtom, newSessionProjectIdAtom } from '../state/ui';
 import { apiClientAtom } from '../lib/api';
 
 interface SessionsSidebarProps {
@@ -19,7 +20,6 @@ interface SessionsSidebarProps {
   onClose: () => void;
   onNewSession: () => void;
   onSelectSession: (sessionId: string, projectId: string) => void;
-  onOverflowSession?: (id: string) => void;
   onSettingsPress: () => void;
   onMicPress: () => void;
   onHelpPress: () => void;
@@ -31,7 +31,6 @@ export function SessionsSidebar({
   onClose,
   onNewSession,
   onSelectSession,
-  onOverflowSession,
   onSettingsPress,
   onMicPress,
   onHelpPress,
@@ -73,7 +72,6 @@ export function SessionsSidebar({
           projectId={projectId}
           selectedSessionId={selectedSessionId}
           onSelectSession={onSelectSession}
-          onOverflowSession={onOverflowSession}
         />
       ) : (
         <View className="flex-1 items-center justify-center px-8">
@@ -252,12 +250,10 @@ function SessionListContent({
   projectId,
   selectedSessionId,
   onSelectSession,
-  onOverflowSession,
 }: {
   projectId: string;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string, projectId: string) => void;
-  onOverflowSession?: (id: string) => void;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
@@ -267,6 +263,9 @@ function SessionListContent({
   const pinnedSet = useMemo(() => new Set(resolvedPinnedIds), [resolvedPinnedIds]);
 
   const api = useAtomValue(apiClientAtom);
+  const router = useRouter();
+  const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>();
+  const setNewSessionProjectId = useSetAtom(newSessionProjectIdAtom);
 
   const togglePin = useCallback(
     (sessionId: string) => {
@@ -277,6 +276,70 @@ function SessionListContent({
       }
     },
     [resolvedPinnedIds, setPinnedIds],
+  );
+
+  const deleteSession = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await api.api.sessions[':sessionId'].$delete({
+          param: { sessionId: sid },
+        });
+        if (!res.ok) {
+          Alert.alert('Error', 'Failed to delete session.');
+          return;
+        }
+        // If we just deleted the active session, navigate away
+        if (sid === params.sessionId && params.projectId) {
+          router.push({ pathname: '/projects/[projectId]', params: { projectId: params.projectId } });
+          setNewSessionProjectId(params.projectId);
+        }
+      } catch {
+        Alert.alert('Error', 'Failed to delete session.');
+      }
+    },
+    [api, params.sessionId, params.projectId, router, setNewSessionProjectId],
+  );
+
+  const handleOverflow = useCallback(
+    (sid: string) => {
+      const isPinned = resolvedPinnedIds.includes(sid);
+      Alert.alert(
+        'Session Options',
+        undefined,
+        [
+          {
+            text: isPinned ? 'Unpin Session' : 'Pin Session',
+            onPress: () => {
+              if (isPinned) {
+                setPinnedIds(resolvedPinnedIds.filter((id: string) => id !== sid));
+              } else {
+                setPinnedIds([...resolvedPinnedIds, sid]);
+              }
+            },
+          },
+          {
+            text: 'Delete Session',
+            style: 'destructive',
+            onPress: () => {
+              Alert.alert(
+                'Delete Session',
+                'This will permanently delete the session and all its data. This cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => deleteSession(sid),
+                  },
+                ],
+              );
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+    },
+    [resolvedPinnedIds, setPinnedIds, deleteSession],
   );
 
   const archiveSession = useCallback(async (sessionId: string) => {
@@ -445,7 +508,7 @@ function SessionListContent({
               isPinned={pinnedSet.has(node.session.id)}
               sessionStatus={node.session.status}
               onPress={onSelectSession}
-              onOverflow={onOverflowSession}
+              onOverflow={handleOverflow}
               onTogglePin={togglePin}
               onArchive={archiveSession}
               hasChildren={node.children.length > 0}
@@ -461,7 +524,7 @@ function SessionListContent({
                   isPinned={pinnedSet.has(child.id)}
                   sessionStatus={child.status}
                   onPress={onSelectSession}
-                  onOverflow={onOverflowSession}
+                  onOverflow={handleOverflow}
                   onTogglePin={togglePin}
                   onArchive={archiveSession}
                   isSubSession
@@ -496,7 +559,7 @@ function SessionListContent({
                   isPinned={pinnedSet.has(node.session.id)}
                   sessionStatus={node.session.status}
                   onPress={onSelectSession}
-                  onOverflow={onOverflowSession}
+                  onOverflow={handleOverflow}
                   onTogglePin={togglePin}
                   onArchive={unarchiveSession}
                   isArchived
@@ -513,7 +576,7 @@ function SessionListContent({
                       isPinned={pinnedSet.has(child.id)}
                       sessionStatus={child.status}
                       onPress={onSelectSession}
-                      onOverflow={onOverflowSession}
+                      onOverflow={handleOverflow}
                       onTogglePin={togglePin}
                       onArchive={unarchiveSession}
                       isArchived
