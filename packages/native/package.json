@@ -2,8 +2,8 @@
   "name": "@mobile-agents/native",
   "version": "1.1.1",
   "scripts": {
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "start": "expo start",
     "prebuild": "expo prebuild",
     "lint": "eslint \"**/*.{js,jsx,ts,tsx}\" && prettier -c \"**/*.{js,jsx,ts,tsx,json}\"",
@@ -32,6 +32,7 @@
     "react": "19.1.0",
     "react-dom": "^19.2.4",
     "react-native": "0.81.5",
+    "react-native-gesture-handler": "^2.30.0",
     "react-native-random-uuid": "^0.1.4",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
@@ -54,5 +55,8 @@
     "typescript": "~5.9.2"
   },
   "main": "expo-router/entry",
-  "private": true
+  "private": true,
+  "patchedDependencies": {
+    "streamdown-rn@0.2.1": "patches/streamdown-rn@0.2.1.patch"
+  }
 }

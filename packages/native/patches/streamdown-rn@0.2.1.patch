@@ -1,0 +1,43 @@
+diff --git a/dist/renderers/ASTRenderer.js b/dist/renderers/ASTRenderer.js
+index 90c835be97d40c140d0c96e2cfb87d59fef9bd54..d631d46cebb322a701c442322e8f3726433f4a12 100644
+--- a/dist/renderers/ASTRenderer.js
++++ b/dist/renderers/ASTRenderer.js
+@@ -11,7 +11,7 @@
+  * - Syntax highlighting for code blocks
+  */
+ import React, { useState, useEffect } from 'react';
+-import { Text, View, ScrollView, Image, Platform } from 'react-native';
++import { Text, View, ScrollView, Image, Platform, Linking } from 'react-native';
+ import SyntaxHighlighter from 'react-native-syntax-highlighter';
+ import { getTextStyles, getBlockStyles } from '../themes';
+ import { extractComponentData } from '../core/componentParser';
+@@ -161,7 +161,7 @@ function renderNode(node, theme, componentRegistry, isStreaming = false, key) {
+             {renderChildren(node, theme, componentRegistry, isStreaming)}
+           </Text>);
+             }
+-            return (<Text key={key} style={styles.link} accessibilityRole="link">
++            return (<Text key={key} style={styles.link} accessibilityRole="link" onPress={() => Linking.openURL(safeUrl)}>
+           {renderChildren(node, theme, componentRegistry, isStreaming)}
+         </Text>);
+         }
+diff --git a/src/renderers/ASTRenderer.tsx b/src/renderers/ASTRenderer.tsx
+index dc6b4be75e63d4e29349bab0eff476ea7ec9ce00..94b0a30abd84781f022b270c81c7d230d78b78b7 100644
+--- a/src/renderers/ASTRenderer.tsx
++++ b/src/renderers/ASTRenderer.tsx
+@@ -12,7 +12,7 @@
+  */
+ 
+ import React, { ReactNode, useState, useEffect } from 'react';
+-import { Text, View, ScrollView, Image, Platform } from 'react-native';
++import { Text, View, ScrollView, Image, Platform, Linking } from 'react-native';
+ import SyntaxHighlighter from 'react-native-syntax-highlighter';
+ import type { Content, Parent, Table as TableNode, Code as CodeNode, List as ListNode, Image as ImageNode, Link as LinkNode } from 'mdast';
+ import type { ThemeConfig, ComponentRegistry, StableBlock } from '../core/types';
+@@ -242,6 +242,7 @@ function renderNode(
+           key={key}
+           style={styles.link}
+           accessibilityRole="link"
++          onPress={() => Linking.openURL(safeUrl)}
+         >
+           {renderChildren(node, theme, componentRegistry, isStreaming)}
+         </Text>
