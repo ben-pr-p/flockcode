@@ -38,3 +38,9 @@ The server exports a Bun-compatible default object with `port` and `fetch`. Rout
 ## Notes
 
 - The native client is **iOS only** — no Android support.
+
+## Code Style Notes
+
+- Use `/** ... */` JSDoc comments for exported components and other exported APIs that should be discoverable in IntelliSense.
+- Keep multiline export docs near the exported declaration for discoverability in IntelliSense.
+- Use `//` comments for inline implementation notes inside function bodies.

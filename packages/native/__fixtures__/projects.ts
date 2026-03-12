@@ -5,8 +5,10 @@ const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
-// The SDK type doesn't include `updated` on time, but the API returns it.
-// Cast to satisfy the type checker while keeping realistic fixture data.
+/**
+ * The SDK type doesn't include `updated` on time, but the API returns it.
+ * Cast to satisfy the type checker while keeping realistic fixture data.
+ */
 export const FIXTURE_PROJECTS = [
   {
     id: 'proj-1',

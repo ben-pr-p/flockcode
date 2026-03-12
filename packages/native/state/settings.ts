@@ -25,8 +25,7 @@ export const connectionInfoAtom = atom<ConnectionInfo>({
   error: null,
 });
 
-// --- Model selection ---
-
+/** Model selection. */
 export type ModelSelection = { providerID: string; modelID: string };
 
 /**

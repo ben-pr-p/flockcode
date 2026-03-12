@@ -11,7 +11,9 @@ import type {
 
 export type { OpencodeEvent }
 
-// Not exported from the v1 SDK types, but the server does emit this event
+/**
+ * Event shape emitted by the server but not exported from v1 SDK types.
+ */
 export type EventMessagePartDelta = {
   type: "message.part.delta"
   properties: {
@@ -30,7 +32,7 @@ export function createClient(baseUrl: string): OpencodeClient {
   return client
 }
 
-// --- Mappers ---
+/** Map SDK event parts into our app message types. */
 
 export function mapPart(p: any): MessagePart {
   switch (p.type) {
@@ -97,8 +99,7 @@ export function mapMessage(raw: any): Message {
   return msg
 }
 
-// --- Opencode class ---
-
+/** Callback signature for receiving Opencode events. */
 export type OpencodeEventCallback = (event: OpencodeEvent | EventMessagePartDelta) => void
 
 export class Opencode {
@@ -154,9 +155,10 @@ export class Opencode {
   }
 }
 
-// --- Exhaustive event handler ---
-// Translates every OpencodeEvent into the appropriate StateStream calls.
-
+/**
+ * Exhaustive event handler contract.
+ * Translates every OpencodeEvent into the appropriate StateStream calls.
+ */
 export type StateStreamSink = {
   sessionCreated(info: any): void
   sessionUpdated(info: any): void

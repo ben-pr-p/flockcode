@@ -86,3 +86,9 @@ Use this for issue management, PR creation, and other GitHub operations. The rep
 - Each package has its own `AGENTS.md` with package-specific guidance
 - Run commands from the package directory, not the root
 - Keep this guide updated when conventions change
+
+## Code Style Notes
+
+- Use `/** ... */` JSDoc comments for exported components and other exported APIs that should be discoverable in IntelliSense.
+- Keep multiline export docs near the exported declaration for discoverability in IntelliSense.
+- Use `//` comments for inline implementation notes inside function bodies.

@@ -1,7 +1,9 @@
 import { z } from "zod/v4"
 
-// Re-export SDK types so the native package can import them without
-// depending on @opencode-ai/sdk directly.
+/**
+ * Re-export SDK types so the native package can import them without
+ * depending on @opencode-ai/sdk directly.
+ */
 export type { Project, Session, File } from "@opencode-ai/sdk"
 
 export interface ChangedFile {
@@ -278,8 +280,9 @@ const MessageError = z.discriminatedUnion("name", [
   UnknownError,
 ])
 
-// --- FileDiff used in user message summaries and session diffs ---
-
+/**
+ * File diff used in user message summaries and session diffs.
+ */
 export interface FileDiff {
   file: string
   before: string
@@ -297,8 +300,7 @@ const FileDiffSchema = z.object({
   status: z.string(), // "added", "modified", "deleted", etc.
 })
 
-// --- Message info schemas ---
-
+/** User message schema used for message summaries. */
 const UserMessageInfo = z.object({
   id: z.string(),
   sessionID: z.string(),
@@ -349,17 +351,20 @@ export const MessageInfoSchema = z.discriminatedUnion("role", [
   AssistantMessageInfo,
 ])
 
-// --- Top-level raw message envelope (as returned by the API) ---
-
+/** Top-level raw message envelope as returned by the API. */
 export const RawMessageSchema = z.object({
   info: MessageInfoSchema,
   parts: z.array(MessagePartSchema),
 })
 
-// ---------- Mapped types used by our app ----------
+/**
+ * Mapped types used by our app.
+ */
 
-// Simplified Message type consumed by the native app.
-// This is what mapMessage() in opencode.ts produces.
+/**
+ * Simplified Message type consumed by the native app.
+ * This is what mapMessage() in opencode.ts produces.
+ */
 
 export interface Message {
   id: string
@@ -401,7 +406,7 @@ export type TextPartInput = { type: "text"; text: string }
 export type AudioPartInput = { type: "audio"; audioData: string; mimeType?: string }
 export type PromptPartInput = TextPartInput | AudioPartInput
 
-// Inferred types from Zod schemas
+/** Inferred types from Zod schemas. */
 export type RawMessage = z.infer<typeof RawMessageSchema>
 export type RawMessageInfo = z.infer<typeof MessageInfoSchema>
 export type RawMessagePart = z.infer<typeof MessagePartSchema>

@@ -24,6 +24,12 @@ bun run format       # eslint --fix + prettier --write
 
 **iOS only** — no Android support. Do not add Android-specific code or configurations.
 
+## Code Style Notes
+
+- Use `/** ... */` JSDoc comments for exported components and other exported APIs that should be discoverable in IntelliSense.
+- Keep multiline export docs near the exported declaration for discoverability in IntelliSense.
+- Use `//` comments only for inline implementation notes inside function bodies.
+
 ## Project Structure
 
 ```

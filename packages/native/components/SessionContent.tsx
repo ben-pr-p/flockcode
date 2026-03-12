@@ -24,10 +24,7 @@ import { useModels } from '../hooks/useModels';
 import { selectedModelAtom } from '../state/settings';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 
-// ---------------------------------------------------------------------------
-// Settings type shared by both wrappers
-// ---------------------------------------------------------------------------
-
+/** Settings type shared by both wrappers. */
 export interface SessionSettings {
   serverUrl: string;
   setServerUrl: (url: string) => void;
@@ -41,13 +38,6 @@ export interface SessionSettings {
   defaultModel: string;
   onResyncConfig?: () => Promise<void>;
 }
-
-// ---------------------------------------------------------------------------
-// SessionView — the shared rendering core
-// ---------------------------------------------------------------------------
-// Both the existing-session and new-session wrappers render through this
-// component. It owns the optimistic voice-message merge, the audio recorder,
-// and delegates to SessionScreen / SplitLayout.
 
 interface SessionViewProps {
   sessionId: string;
@@ -66,6 +56,12 @@ interface SessionViewProps {
   sessionModelInfo?: { modelID?: string; providerID?: string } | null;
 }
 
+/**
+ * Shared rendering core for a session.
+ * Both the existing-session and new-session wrappers render through this
+ * component. It owns the optimistic voice-message merge, the audio recorder,
+ * and delegates to SessionScreen / SplitLayout.
+ */
 export function SessionView({
   sessionId,
   session,
@@ -282,12 +278,6 @@ export function SessionView({
   );
 }
 
-// ---------------------------------------------------------------------------
-// SessionContent — existing session wrapper
-// ---------------------------------------------------------------------------
-// Fetches real session data from the server and wires send callbacks that
-// prompt the existing session.
-
 interface SessionContentProps {
   sessionId: string;
   isTabletLandscape: boolean;
@@ -296,6 +286,11 @@ interface SessionContentProps {
   settings: SessionSettings;
 }
 
+/**
+ * Existing session wrapper.
+ * Fetches real session data from the server and wires send callbacks that
+ * prompt the existing session.
+ */
 export function SessionContent({
   sessionId,
   isTabletLandscape,
@@ -448,13 +443,6 @@ function ExistingSessionDataLoader({
   );
 }
 
-// ---------------------------------------------------------------------------
-// NewSessionContent — new session wrapper
-// ---------------------------------------------------------------------------
-// Provides a placeholder session and wires send callbacks that create the
-// session on the server (via the atomic createSessionWithPrompt RPC) before
-// navigating to the real session.
-
 interface NewSessionContentProps {
   projectId: string;
   isTabletLandscape: boolean;
@@ -464,6 +452,12 @@ interface NewSessionContentProps {
   settings: SessionSettings;
 }
 
+/**
+ * New-session wrapper.
+ * Provides a placeholder session and wires send callbacks that create the
+ * session on the server (via the atomic createSessionWithPrompt RPC) before
+ * navigating to the real session.
+ */
 export function NewSessionContent({
   projectId,
   isTabletLandscape,
