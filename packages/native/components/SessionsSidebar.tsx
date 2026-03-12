@@ -1,52 +1,73 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin, Archive, ArchiveRestore } from 'lucide-react-native';
-import { useMemo, useCallback } from 'react';
-import { useAtom, useSetAtom } from 'jotai/react';
-import { useAtomValue } from 'jotai/react';
+import { useAtom, useAtomValue } from 'jotai/react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useStateQuery, useAppStateQuery, type SessionValue, type SessionMetaValue } from '../lib/stream-db';
-import { pinnedSessionIdsAtom, newSessionProjectIdAtom } from '../state/ui';
+import { pinnedSessionIdsAtom } from '../state/ui';
 import { apiClientAtom } from '../lib/api';
 
 interface SessionsSidebarProps {
   projectId: string | undefined;
   selectedSessionId: string | null;
-  onClose: () => void;
-  onNewSession: () => void;
-  onSelectSession: (sessionId: string, projectId: string) => void;
-  onSettingsPress: () => void;
-  onMicPress: () => void;
-  onHelpPress: () => void;
+  /** Navigation object passed from the Drawer's drawerContent render prop. */
+  drawerNavigation: DrawerContentComponentProps['navigation'];
 }
 
+/** Left drawer content — lists sessions for the current project. */
 export function SessionsSidebar({
   projectId,
   selectedSessionId,
-  onClose,
-  onNewSession,
-  onSelectSession,
-  onSettingsPress,
-  onMicPress,
-  onHelpPress,
+  drawerNavigation,
 }: SessionsSidebarProps) {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C';
   const mutedIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const micIconColor = colorScheme === 'dark' ? '#0C0A09' : '#FFFFFF';
+  const router = useRouter();
+
+  const closeDrawer = useCallback(() => {
+    drawerNavigation.closeDrawer();
+  }, [drawerNavigation]);
+
+  const handleNewSession = useCallback(() => {
+    if (!projectId) return;
+    router.push({
+      pathname: '/projects/[projectId]/new-session',
+      params: { projectId },
+    });
+    closeDrawer();
+  }, [projectId, router, closeDrawer]);
+
+  const handleSelectSession = useCallback(
+    (sessionId: string, pid: string) => {
+      router.push({
+        pathname: '/projects/[projectId]/sessions/[sessionId]',
+        params: { projectId: pid, sessionId },
+      });
+      closeDrawer();
+    },
+    [router, closeDrawer],
+  );
+
+  const handleSettingsPress = useCallback(() => {
+    closeDrawer();
+    router.push('/settings');
+  }, [router, closeDrawer]);
 
   return (
     <GestureHandlerRootView className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
       {/* Header */}
       <View className="h-14 flex-row items-center justify-between px-5">
         <Pressable
-          onPress={onClose}
+          onPress={closeDrawer}
           className="h-10 w-10 items-center justify-center rounded-lg bg-white dark:bg-stone-900">
           <Menu size={20} color={iconColor} />
         </Pressable>
@@ -58,7 +79,7 @@ export function SessionsSidebar({
         </Text>
 
         <Pressable
-          onPress={onNewSession}
+          onPress={handleNewSession}
           className="h-10 w-10 items-center justify-center rounded-lg bg-white dark:bg-stone-900">
           <Plus size={20} color={iconColor} />
         </Pressable>
@@ -71,7 +92,7 @@ export function SessionsSidebar({
         <SessionListContent
           projectId={projectId}
           selectedSessionId={selectedSessionId}
-          onSelectSession={onSelectSession}
+          onSelectSession={handleSelectSession}
         />
       ) : (
         <View className="flex-1 items-center justify-center px-8">
@@ -87,17 +108,17 @@ export function SessionsSidebar({
         style={{
           paddingBottom: Math.max(insets.bottom, 28),
         }}>
-        <Pressable testID="settings-icon" onPress={onSettingsPress} hitSlop={8}>
+        <Pressable testID="settings-icon" onPress={handleSettingsPress} hitSlop={8}>
           <Settings size={22} color={mutedIconColor} />
         </Pressable>
 
         <Pressable
-          onPress={onMicPress}
+          onPress={() => {}}
           className="h-12 w-12 items-center justify-center rounded-xl bg-amber-600 dark:bg-amber-500">
           <Mic size={22} color={micIconColor} />
         </Pressable>
 
-        <Pressable onPress={onHelpPress} hitSlop={8}>
+        <Pressable onPress={() => {}} hitSlop={8}>
           <HelpCircle size={22} color={mutedIconColor} />
         </Pressable>
       </View>
@@ -265,7 +286,6 @@ function SessionListContent({
   const api = useAtomValue(apiClientAtom);
   const router = useRouter();
   const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>();
-  const setNewSessionProjectId = useSetAtom(newSessionProjectIdAtom);
 
   const togglePin = useCallback(
     (sessionId: string) => {
@@ -290,14 +310,16 @@ function SessionListContent({
         }
         // If we just deleted the active session, navigate away
         if (sid === params.sessionId && params.projectId) {
-          router.push({ pathname: '/projects/[projectId]', params: { projectId: params.projectId } });
-          setNewSessionProjectId(params.projectId);
+          router.push({
+            pathname: '/projects/[projectId]/new-session',
+            params: { projectId: params.projectId },
+          });
         }
       } catch {
         Alert.alert('Error', 'Failed to delete session.');
       }
     },
-    [api, params.sessionId, params.projectId, router, setNewSessionProjectId],
+    [api, params.sessionId, params.projectId, router],
   );
 
   const handleOverflow = useCallback(

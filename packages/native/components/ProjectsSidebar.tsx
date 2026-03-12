@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { ActivityIndicator, View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { X, Plus } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import { ProjectCard } from './ProjectCard';
 import { useStateQuery, type ProjectValue } from '../lib/stream-db';
 import { projectFilterAtom } from '../state/ui';
+import { apiClientAtom } from '../lib/api';
 
 interface ProjectGroup {
   label: string;
@@ -16,7 +18,7 @@ interface ProjectGroup {
 /**
  * Derive filter groups from project worktree paths.
  * Finds shared parent directory prefixes where 2+ projects share the same
- * immediate parent-of-parent segment. E.g. ~/work/a and ~/work/b → "work" group.
+ * immediate parent-of-parent segment. E.g. ~/work/a and ~/work/b -> "work" group.
  */
 function deriveGroups(projects: ProjectValue[]): ProjectGroup[] {
   if (projects.length === 0) return [];
@@ -55,19 +57,12 @@ function deriveGroups(projects: ProjectValue[]): ProjectGroup[] {
 interface ProjectsSidebarProps {
   selectedProjectId: string | null;
   onClose: () => void;
-  onAddProject: () => void;
-  onSelectProject: (projectId: string) => void;
-  onNewSession: (projectId: string) => void;
-  onOverflow: (projectId: string) => void;
 }
 
+/** Right drawer content — lists all projects. */
 export function ProjectsSidebar({
   selectedProjectId,
   onClose,
-  onAddProject,
-  onSelectProject,
-  onNewSession,
-  onOverflow,
 }: ProjectsSidebarProps) {
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,6 +76,9 @@ export function ProjectsSidebar({
   const placeholderColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const showSearch = projects.length >= 8;
   const showCount = projects.length >= 8;
+
+  const router = useRouter();
+  const api = useAtomValue(apiClientAtom);
 
   const groups = useMemo(() => deriveGroups(projects), [projects]);
 
@@ -96,6 +94,33 @@ export function ProjectsSidebar({
   const filtered = searchQuery
     ? groupFiltered.filter((p) => p.worktree.toLowerCase().includes(searchQuery.toLowerCase()))
     : groupFiltered;
+
+  const handleSelectProject = useCallback(
+    async (pid: string) => {
+      onClose();
+      // Try to find existing sessions for this project
+      try {
+        const res = await api.api.projects[':projectId'].sessions.$get({
+          param: { projectId: pid },
+        });
+        if (res.ok) {
+          const sessions = (await res.json()) as any[];
+          if (sessions.length > 0) {
+            router.push({
+              pathname: '/projects/[projectId]/sessions/[sessionId]',
+              params: { projectId: pid, sessionId: sessions[0].id },
+            });
+            return;
+          }
+        }
+      } catch {}
+      router.push({
+        pathname: '/projects/[projectId]/new-session',
+        params: { projectId: pid },
+      });
+    },
+    [api, router, onClose],
+  );
 
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
@@ -114,7 +139,7 @@ export function ProjectsSidebar({
         </Text>
 
         <Pressable
-          onPress={onAddProject}
+          onPress={() => {}}
           className="h-10 w-10 items-center justify-center rounded-lg bg-white dark:bg-stone-900">
           <Plus size={20} color={iconColor} />
         </Pressable>
@@ -197,7 +222,7 @@ export function ProjectsSidebar({
             Add a project to get started
           </Text>
           <Pressable
-            onPress={onAddProject}
+            onPress={() => {}}
             className="mt-4 h-8 items-center justify-center rounded-lg bg-white px-4 dark:bg-stone-900">
             <Text className="text-sm text-stone-700 dark:text-stone-400">+ New Project</Text>
           </Pressable>
@@ -213,8 +238,8 @@ export function ProjectsSidebar({
               project={project}
               index={index}
               isSelected={project.id === selectedProjectId}
-              onPress={onSelectProject}
-              onOverflow={onOverflow}
+              onPress={handleSelectProject}
+              onOverflow={() => {}}
             />
           ))}
         </ScrollView>
