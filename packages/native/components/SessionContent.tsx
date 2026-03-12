@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAtomValue } from 'jotai';
 import { eq } from '@tanstack/react-db';
@@ -54,6 +54,8 @@ interface SessionViewProps {
   emptyMessage?: string;
   /** Latest model info from the session's raw messages (for display name derivation) */
   sessionModelInfo?: { modelID?: string; providerID?: string } | null;
+  /** Optional toggle element rendered below the empty message (used by new-session for worktree option) */
+  worktreeToggle?: React.ReactNode;
 }
 
 /**
@@ -76,6 +78,7 @@ export function SessionView({
   onAbort,
   emptyMessage,
   sessionModelInfo,
+  worktreeToggle,
 }: SessionViewProps) {
   const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session');
   const [isSending, setIsSending] = useState(false);
@@ -272,6 +275,7 @@ export function SessionView({
         emptyMessage={emptyMessage}
         modelName={modelName}
         onModelPress={handleModelPress}
+        worktreeToggle={worktreeToggle}
       />
       {modelSheet}
     </>
@@ -470,6 +474,8 @@ export function NewSessionContent({
   const currentModel = useAtomValue(selectedModelAtom);
   // Guard against multiple simultaneous session creations
   const creatingRef = useRef(false);
+  // Whether to create a git worktree for this session (for parallel work)
+  const [useWorktree, setUseWorktree] = useState(false);
 
   // Look up the project to get worktree for display name
   const { data: projectResults } = useStateQuery(
@@ -509,7 +515,8 @@ export function NewSessionContent({
           json: {
             parts,
             ...(currentModel ? { model: currentModel } : {}),
-          },
+            ...(useWorktree ? { useWorktree: true } : {}),
+          } as any,
         });
         if (!res.ok) throw new Error('Create session failed');
         const data = (await res.json()) as { sessionId: string };
@@ -519,7 +526,7 @@ export function NewSessionContent({
         creatingRef.current = false;
       }
     },
-    [api, projectId, onSessionCreated, currentModel]
+    [api, projectId, onSessionCreated, currentModel, useWorktree]
   );
 
   const handleSendText = useCallback(
@@ -551,6 +558,23 @@ export function NewSessionContent({
       onSendText={handleSendText}
       onSendAudio={handleSendAudio}
       emptyMessage="Send a message to start a new session"
+      worktreeToggle={
+        <Pressable
+          onPress={() => setUseWorktree((v) => !v)}
+          className="flex-row items-center gap-2 mt-4 px-4 py-2 rounded-lg bg-stone-100 dark:bg-stone-900"
+        >
+          <View
+            className={`w-4 h-4 rounded border ${
+              useWorktree
+                ? 'bg-blue-500 border-blue-500'
+                : 'border-stone-400 dark:border-stone-600'
+            }`}
+          />
+          <Text className="text-stone-500 dark:text-stone-400 text-sm">
+            Run in worktree
+          </Text>
+        </Pressable>
+      }
     />
   );
 }

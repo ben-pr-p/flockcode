@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { DurableStreamServer } from "durable-streams-web-standard"
 import { FileBackedStreamStore } from "@durable-streams/server"
-import { join } from "node:path"
+import { join, basename, resolve } from "node:path"
 import { homedir } from "node:os"
 import { customAlphabet } from "nanoid"
 import { z } from "zod/v4"
@@ -9,10 +9,12 @@ import { zValidator } from "@hono/zod-validator"
 import { createClient, Opencode, handleOpencodeEvent } from "./opencode"
 import { StateStream } from "./state-stream"
 import { sendPrompt } from "./prompt"
+import { WorktreeDriver } from "./worktree"
 import { logger } from 'hono/logger'
 import type { Session } from "./types"
 
 const generateInstanceId = customAlphabet("abcdefghijklmnopqrstuvwxyz", 12)
+const generateWorktreeId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 6)
 
 // Shared schema for prompt parts
 const PromptPartsSchema = z.object({
@@ -26,6 +28,11 @@ const PromptPartsSchema = z.object({
     providerID: z.string(),
     modelID: z.string(),
   }).optional(),
+})
+
+// Extended schema for session creation — adds optional worktree flag
+const CreateSessionSchema = PromptPartsSchema.extend({
+  useWorktree: z.boolean().optional(),
 })
 
 export async function createApp(opencodeUrl: string) {
@@ -47,6 +54,25 @@ export async function createApp(opencodeUrl: string) {
   const appStore = new FileBackedStreamStore({ dataDir })
   const appDs = new DurableStreamServer({ store: appStore })
   await appDs.createStream("/", { contentType: "application/json" })
+
+  // In-memory index of session→worktree mappings, rebuilt from the persistent
+  // app state stream on startup so worktree cleanup survives server restarts.
+  const sessionWorktrees = new Map<string, { worktreePath: string; projectWorktree: string }>()
+  try {
+    const { messages } = appDs.readStream("/")
+    const decoder = new TextDecoder()
+    for (const msg of messages) {
+      const event = JSON.parse(decoder.decode(msg.data))
+      if (event.type === "sessionWorktree" && event.value) {
+        sessionWorktrees.set(event.key, {
+          worktreePath: event.value.worktreePath,
+          projectWorktree: event.value.projectWorktree,
+        })
+      }
+    }
+  } catch {
+    // Stream may be empty on first boot — that's fine
+  }
 
   // Subscribe to opencode events and route them to the state stream
   opencode.spawnListener((event) => handleOpencodeEvent(event, stateStream), opencodeUrl).catch((err) => {
@@ -118,14 +144,16 @@ export async function createApp(opencodeUrl: string) {
     )
 
     /**
-     * Create a new session for a project and send the first prompt atomically
+     * Create a new session for a project and send the first prompt atomically.
+     * If `useWorktree: true`, a git worktree is created first and the session
+     * runs inside it instead of the main project directory.
      */
     .post(
       "/projects/:projectId/sessions",
-      zValidator("json", PromptPartsSchema),
+      zValidator("json", CreateSessionSchema),
       async (c) => {
         const projectId = c.req.param("projectId")
-        const { parts, model } = c.req.valid("json")
+        const { parts, model, useWorktree } = c.req.valid("json")
 
         // Look up the project to get its worktree
         const projectsRes = await client.project.list()
@@ -134,19 +162,53 @@ export async function createApp(opencodeUrl: string) {
           return c.json({ error: `Project not found: ${projectId}` }, 404)
         }
 
-        // Create the session in the project's worktree
+        // Determine the directory for this session
+        let directory: string = project.worktree
+        let worktreePath: string | undefined
+
+        if (useWorktree) {
+          try {
+            const worktreeId = generateWorktreeId()
+            const projectName = basename(project.worktree)
+            // Place worktrees at ../worktrees/<project-name>/<id> relative to project root
+            const targetPath = resolve(project.worktree, "..", "worktrees", projectName, worktreeId)
+            const branchName = `worktree/${worktreeId}`
+
+            const driver = await WorktreeDriver.open(project.worktree)
+            await driver.create(branchName, { path: targetPath })
+
+            directory = targetPath
+            worktreePath = targetPath
+          } catch (err: any) {
+            console.error("[POST /api/projects/:projectId/sessions] worktree creation failed:", err)
+            return c.json({ error: `Failed to create worktree: ${err.message}` }, 500)
+          }
+        }
+
+        // Create the session in the chosen directory
         const createRes = await client.session.create({
-          query: { directory: project.worktree },
+          query: { directory },
         })
         if (createRes.error) {
           return c.json({ error: "Failed to create session" }, 500)
         }
         const sessionId = createRes.data!.id
 
+        // Persist the session→worktree mapping so we can clean up on delete
+        if (worktreePath) {
+          sessionWorktrees.set(sessionId, { worktreePath, projectWorktree: project.worktree })
+          await appDs.appendToStream("/", JSON.stringify({
+            type: "sessionWorktree",
+            key: sessionId,
+            value: { sessionId, worktreePath, projectWorktree: project.worktree },
+            headers: { operation: "upsert" },
+          }), { contentType: "application/json" })
+        }
+
         // Fire the prompt in the background — don't block the response.
         // The client navigates to the session immediately and sees streaming
         // updates via the SSE durable stream.
-        sendPrompt(client, sessionId, parts, project.worktree, model).catch(
+        sendPrompt(client, sessionId, parts, directory, model).catch(
           (err: any) => {
             console.error("[POST /api/projects/:projectId/sessions] prompt failed:", err)
           },
@@ -156,7 +218,7 @@ export async function createApp(opencodeUrl: string) {
       },
     )
 
-    // List sessions for a project (filtered by worktree)
+    // List sessions for a project (queries main worktree + all git worktrees)
     .get("/projects/:projectId/sessions", async (c) => {
       const projectId = c.req.param("projectId")
 
@@ -167,14 +229,28 @@ export async function createApp(opencodeUrl: string) {
         return c.json({ error: `Project not found: ${projectId}` }, 404)
       }
 
-      const sessionsRes = await client.session.list()
-      if (sessionsRes.error) {
-        return c.json({ error: "Failed to list sessions" }, 500)
+      // Collect all directories: main worktree + any git worktrees
+      const directories: string[] = [project.worktree]
+      try {
+        const driver = await WorktreeDriver.open(project.worktree)
+        const entries = await driver.list()
+        for (const entry of entries) {
+          if (entry.path !== project.worktree) {
+            directories.push(entry.path)
+          }
+        }
+      } catch {
+        // Not a git repo or worktree listing failed — just use main directory
       }
-      const worktree = project.worktree
-      const sessions = ((sessionsRes.data ?? []) as Session[])
-        .filter((s) => s.directory === worktree || s.directory.startsWith(worktree + "/"))
-        .sort((a, b) => b.time.updated - a.time.updated)
+
+      // Query sessions for each directory in parallel
+      const results = await Promise.all(
+        directories.map(async (dir) => {
+          const res = await client.session.list({ query: { directory: dir } })
+          return ((res.data ?? []) as Session[])
+        })
+      )
+      const sessions = results.flat().sort((a, b) => b.time.updated - a.time.updated)
 
       return c.json(sessions)
     })
@@ -219,7 +295,7 @@ export async function createApp(opencodeUrl: string) {
       }
     })
 
-    // Delete a session permanently
+    // Delete a session permanently (and remove its worktree if one exists)
     .delete("/sessions/:sessionId", async (c) => {
       const sessionId = c.req.param("sessionId")
       try {
@@ -238,6 +314,19 @@ export async function createApp(opencodeUrl: string) {
         // Push the deletion through the durable stream immediately so
         // connected clients see it without waiting for the SSE event.
         stateStream.sessionDeleted({ id: sessionId })
+
+        // Clean up the git worktree if this session had one
+        const worktreeInfo = sessionWorktrees.get(sessionId)
+        if (worktreeInfo) {
+          try {
+            const driver = await WorktreeDriver.open(worktreeInfo.projectWorktree)
+            await driver.remove(worktreeInfo.worktreePath, { force: true, deleteBranch: true })
+          } catch (err: any) {
+            // Log but don't fail the delete — the session is already gone
+            console.error(`[DELETE /api/sessions/${sessionId}] worktree cleanup failed:`, err)
+          }
+          sessionWorktrees.delete(sessionId)
+        }
 
         return c.json({ success: true })
       } catch (err: any) {

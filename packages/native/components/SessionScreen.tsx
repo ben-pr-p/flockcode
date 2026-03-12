@@ -32,6 +32,8 @@ interface SessionScreenProps {
   emptyMessage?: string
   modelName: string
   onModelPress?: () => void
+  /** Optional toggle element rendered below the empty message (e.g. worktree option) */
+  worktreeToggle?: React.ReactNode
 }
 
 export function SessionScreen({
@@ -51,6 +53,7 @@ export function SessionScreen({
   emptyMessage,
   modelName,
   onModelPress,
+  worktreeToggle,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -75,6 +78,7 @@ export function SessionScreen({
       {emptyMessage ? (
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-stone-400 dark:text-stone-600 text-sm text-center">{emptyMessage}</Text>
+          {worktreeToggle}
         </View>
       ) : activeTab === 'session' ? (
         <ChatThread messages={messages} onToolCallPress={onToolCallPress} />

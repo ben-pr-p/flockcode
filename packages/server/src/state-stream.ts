@@ -4,6 +4,7 @@ import type { DurableStreamServer } from "durable-streams-web-standard"
 import type { OpencodeClient, StateStreamSink } from "./opencode"
 import { mapMessage, mapPart } from "./opencode"
 import type { Message, MessagePart, ChangedFile } from "./types"
+import { WorktreeDriver } from "./worktree"
 
 type StateEvent = {
   type: "project" | "session" | "message" | "change"
@@ -41,10 +42,28 @@ class StateStream implements StateStreamSink {
       })
     }
 
-    // Load each projects sessions in parallel
+    // For each project, collect all directories that may contain sessions:
+    // the main worktree plus any git worktrees created for parallel sessions.
+    const allDirectories: string[] = []
+    for (const project of projects.data ?? []) {
+      allDirectories.push(project.worktree)
+      try {
+        const driver = await WorktreeDriver.open(project.worktree)
+        const entries = await driver.list()
+        for (const entry of entries) {
+          if (entry.path !== project.worktree) {
+            allDirectories.push(entry.path)
+          }
+        }
+      } catch {
+        // Not a git repo or worktree listing failed — skip
+      }
+    }
+
+    // Load sessions for each directory in parallel
     const projectSessions = await Promise.all(
-      projects.data?.map(async (project) => {
-        const res = await this.#client.session.list({ query: { directory: project.worktree } })
+      allDirectories.map(async (directory) => {
+        const res = await this.#client.session.list({ query: { directory } })
 
         for (const session of res.data ?? []) {
           if ((session as any).directory) {
@@ -54,7 +73,7 @@ class StateStream implements StateStreamSink {
         }
 
         return res.data ?? []
-      }) ?? []
+      })
     )
     const sessions = projectSessions.flat()
 
