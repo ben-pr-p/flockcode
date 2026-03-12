@@ -18,6 +18,8 @@ import type { RecordingState } from '../hooks/useAudioRecorder'
 interface SplitLayoutProps {
   sessionId: string
   session: SessionValue
+  /** Pre-computed display name showing project dir (and worktree dir if different) */
+  projectName: string
   messages: Message[]
   changes: ChangedFile[]
   onMenuPress: () => void
@@ -52,6 +54,7 @@ interface SplitLayoutProps {
 export function SplitLayout({
   sessionId,
   session,
+  projectName,
   messages,
   changes,
   onMenuPress,
@@ -118,7 +121,7 @@ export function SplitLayout({
               className="text-sm font-semibold text-stone-900 dark:text-stone-50"
               style={{ fontFamily: 'JetBrains Mono' }}
             >
-              {session.directory ? session.directory.split('/').pop() || session.directory : ''}
+              {projectName}
             </Text>
           </View>
         </View>

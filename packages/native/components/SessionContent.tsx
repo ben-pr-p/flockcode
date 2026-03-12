@@ -14,6 +14,7 @@ import {
   flattenServerMessage,
   type UIMessage as Message,
   type SessionValue,
+  type ProjectValue,
   type ChangeValue,
   type ChangedFile,
 } from '../lib/stream-db';
@@ -85,6 +86,30 @@ export function SessionView({
   const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([]);
   const voiceIdCounter = useRef(0);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+
+  // Look up the project to derive the display name from the main worktree path
+  const { data: projectResults } = useStateQuery(
+    (db, q) =>
+      q
+        .from({ projects: db.collections.projects })
+        .where(({ projects }) => eq(projects.id, session.projectID)),
+    [session.projectID]
+  );
+  const project = (projectResults as ProjectValue[] | undefined)?.[0];
+
+  // Derive display name: show the project's main directory name, with the
+  // worktree directory in parentheses when the session runs in a different path.
+  const projectDisplayName = useMemo(() => {
+    const projectWorktree = project?.worktree ?? '';
+    const sessionDir = session.directory ?? '';
+    const mainName = projectWorktree.split('/').pop() || projectWorktree || '';
+    if (!mainName) return sessionDir.split('/').pop() || sessionDir;
+    if (sessionDir && sessionDir !== projectWorktree) {
+      const worktreeName = sessionDir.split('/').pop() || sessionDir;
+      return `${mainName} (${worktreeName})`;
+    }
+    return mainName;
+  }, [project?.worktree, session.directory]);
 
   // Model selection state
   const { selectedModel, setSelectedModel, catalog, getDisplayNames, getDefaultModel, refetchCatalog } = useModels();
@@ -238,6 +263,7 @@ export function SessionView({
         <SplitLayout
           sessionId={sessionId}
           session={session}
+          projectName={projectDisplayName}
           messages={messages}
           changes={changes}
           onMenuPress={onMenuPress}
@@ -261,6 +287,7 @@ export function SessionView({
       <SessionScreen
         sessionId={sessionId}
         session={session}
+        projectName={projectDisplayName}
         messages={messages}
         changes={changes}
         activeTab={activeTab}

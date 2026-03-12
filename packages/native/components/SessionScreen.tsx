@@ -13,6 +13,8 @@ import type { RecordingState } from '../hooks/useAudioRecorder'
 interface SessionScreenProps {
   sessionId: string
   session: SessionValue
+  /** Pre-computed display name showing project dir (and worktree dir if different) */
+  projectName: string
   messages: Message[]
   changes: ChangedFile[]
   activeTab: 'session' | 'changes'
@@ -39,6 +41,7 @@ interface SessionScreenProps {
 export function SessionScreen({
   sessionId,
   session,
+  projectName,
   messages,
   changes,
   activeTab,
@@ -66,7 +69,7 @@ export function SessionScreen({
       keyboardVerticalOffset={0}
     >
       <SessionHeader
-        projectName={session.directory ? session.directory.split('/').pop() || session.directory : ''}
+        projectName={projectName}
         branchName={session.title || 'Untitled'}
         relativeTime={formatRelativeTime(session.time.updated)}
         onMenuPress={onMenuPress}
