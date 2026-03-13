@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAtomValue } from 'jotai';
 import { eq } from '@tanstack/react-db';
@@ -86,6 +86,48 @@ export function SessionView({
   const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([]);
   const voiceIdCounter = useRef(0);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+
+  // Worktree status (merge state + uncommitted changes) from the session stream
+  const { data: worktreeStatusResults } = useStateQuery(
+    (db, q) =>
+      q
+        .from({ worktreeStatuses: db.collections.worktreeStatuses })
+        .where(({ worktreeStatuses }) => eq(worktreeStatuses.sessionId, sessionId)),
+    [sessionId]
+  );
+
+  const worktreeStatus = (
+    worktreeStatusResults as import('../lib/stream-db').WorktreeStatusValue[] | undefined
+  )?.[0];
+
+  console.log({ worktreeStatus });
+
+  const api = useAtomValue(apiClientAtom);
+
+  const handleMerge = useCallback(async () => {
+    setIsMerging(true);
+    try {
+      const res = await (api.api.sessions[':sessionId'].merge as any).$post({
+        param: { sessionId },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        Alert.alert('Merged', 'Branch merged into main successfully.');
+      } else if (data.conflictingFiles?.length > 0) {
+        Alert.alert(
+          'Merge Conflict',
+          `Conflicts in:\n${data.conflictingFiles.join('\n')}\n\nAsk the agent to rebase onto main and resolve the conflicts, then try again.`
+        );
+      } else {
+        Alert.alert('Merge Failed', data.reason ?? data.error ?? 'Unknown error');
+      }
+    } catch (err: any) {
+      Alert.alert('Merge Failed', err.message ?? 'Unknown error');
+    } finally {
+      setIsMerging(false);
+    }
+  }, [api, sessionId]);
 
   // Look up the project to derive the display name from the main worktree path
   const { data: projectResults } = useStateQuery(
@@ -112,11 +154,18 @@ export function SessionView({
   }, [project?.worktree, session.directory]);
 
   // Model selection state
-  const { selectedModel, setSelectedModel, catalog, getDisplayNames, getDefaultModel, refetchCatalog } = useModels();
+  const {
+    selectedModel,
+    setSelectedModel,
+    catalog,
+    getDisplayNames,
+    getDefaultModel,
+    refetchCatalog,
+  } = useModels();
 
   // Query all messages to derive recently used models
-  const { data: allRawMessages } = useStateQuery(
-    (db, q) => q.from({ messages: db.collections.messages }),
+  const { data: allRawMessages } = useStateQuery((db, q) =>
+    q.from({ messages: db.collections.messages })
   );
   const recentModels: RecentModel[] = useMemo(() => {
     if (!allRawMessages) return [];
@@ -223,7 +272,10 @@ export function SessionView({
   // Display string for settings screen's "Default model" row
   const settingsDefaultModel = useMemo(() => {
     if (selectedModel) {
-      const { modelName: mn, providerName: pn } = getDisplayNames(selectedModel.modelID, selectedModel.providerID);
+      const { modelName: mn, providerName: pn } = getDisplayNames(
+        selectedModel.modelID,
+        selectedModel.providerID
+      );
       return pn ? `${pn} / ${mn}` : mn;
     }
     const dm = getDefaultModel();
@@ -242,7 +294,7 @@ export function SessionView({
     (model: { providerID: string; modelID: string } | null) => {
       setSelectedModel(model);
     },
-    [setSelectedModel],
+    [setSelectedModel]
   );
 
   const modelSheet = (
@@ -272,10 +324,17 @@ export function SessionView({
           onSend={handleSend}
           isSending={isSending}
           audioRecorder={audioRecorder}
-          settings={{ ...settings, defaultModel: settingsDefaultModel, onResyncConfig: refetchCatalog }}
+          settings={{
+            ...settings,
+            defaultModel: settingsDefaultModel,
+            onResyncConfig: refetchCatalog,
+          }}
           onAbort={onAbort}
           modelName={modelName}
           onModelPress={handleModelPress}
+          worktreeStatus={worktreeStatus}
+          isMerging={isMerging}
+          onMerge={handleMerge}
         />
         {modelSheet}
       </>
@@ -303,6 +362,9 @@ export function SessionView({
         modelName={modelName}
         onModelPress={handleModelPress}
         worktreeToggle={worktreeToggle}
+        worktreeStatus={worktreeStatus}
+        isMerging={isMerging}
+        onMerge={handleMerge}
       />
       {modelSheet}
     </>
@@ -382,9 +444,7 @@ function ExistingSessionDataLoader({
   );
   const sortedRawMessages = useMemo(() => {
     if (!rawMessages) return [];
-    return (rawMessages as ServerMessage[])
-      .slice()
-      .sort((a, b) => a.createdAt - b.createdAt);
+    return (rawMessages as ServerMessage[]).slice().sort((a, b) => a.createdAt - b.createdAt);
   }, [rawMessages]);
 
   const serverMessages = useMemo(() => {
@@ -588,18 +648,13 @@ export function NewSessionContent({
       worktreeToggle={
         <Pressable
           onPress={() => setUseWorktree((v) => !v)}
-          className="flex-row items-center gap-2 mt-4 px-4 py-2 rounded-lg bg-stone-100 dark:bg-stone-900"
-        >
+          className="mt-4 flex-row items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 dark:bg-stone-900">
           <View
-            className={`w-4 h-4 rounded border ${
-              useWorktree
-                ? 'bg-blue-500 border-blue-500'
-                : 'border-stone-400 dark:border-stone-600'
+            className={`h-4 w-4 rounded border ${
+              useWorktree ? 'border-blue-500 bg-blue-500' : 'border-stone-400 dark:border-stone-600'
             }`}
           />
-          <Text className="text-stone-500 dark:text-stone-400 text-sm">
-            Run in worktree
-          </Text>
+          <Text className="text-sm text-stone-500 dark:text-stone-400">Run in worktree</Text>
         </Pressable>
       }
     />

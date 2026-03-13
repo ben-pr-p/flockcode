@@ -1,5 +1,14 @@
 export { useStateQuery, useAppStateQuery, flattenServerMessage };
-export type { ProjectValue, SessionValue, ChangeValue, SessionMetaValue, StateDB, AppStateDB, UIMessage };
+export type {
+  ProjectValue,
+  SessionValue,
+  ChangeValue,
+  WorktreeStatusValue,
+  SessionMetaValue,
+  StateDB,
+  AppStateDB,
+  UIMessage,
+};
 export type { ChangedFile } from '../../server/src/types';
 
 import { atom } from 'jotai';
@@ -49,6 +58,19 @@ type ChangeValue = {
   files: ChangedFile[];
 };
 
+type WorktreeStatusValue = {
+  sessionId: string;
+  isWorktreeSession: boolean;
+  branch?: string;
+  /** Whether the branch has been merged into main (via --no-ff). */
+  merged?: boolean;
+  /** Whether there are commits on the branch not yet in main. */
+  hasUnmergedCommits?: boolean;
+  /** Whether the worktree has staged or unstaged changes. */
+  hasUncommittedChanges?: boolean;
+  error?: string;
+};
+
 const stateDef = {
   projects: {
     schema: passthrough<ProjectValue>(),
@@ -64,6 +86,11 @@ const stateDef = {
   changes: {
     schema: passthrough<ChangeValue>(),
     type: 'change' as const,
+    primaryKey: 'sessionId' as const,
+  },
+  worktreeStatuses: {
+    schema: passthrough<WorktreeStatusValue>(),
+    type: 'worktreeStatus' as const,
     primaryKey: 'sessionId' as const,
   },
 };

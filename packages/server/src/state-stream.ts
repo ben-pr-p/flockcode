@@ -7,11 +7,14 @@ import type { Message, MessagePart, ChangedFile } from "./types"
 import { WorktreeDriver } from "./worktree"
 
 type StateEvent = {
-  type: "project" | "session" | "message" | "change"
+  type: "project" | "session" | "message" | "change" | "worktreeStatus"
   key: string
   value?: unknown
   headers: { operation: "insert" | "update" | "upsert" | "delete" }
 }
+
+/** Session-to-worktree mapping shared with app.ts. */
+export type SessionWorktreeMap = Map<string, { worktreePath: string; projectWorktree: string }>
 
 type SessionStatus = "idle" | "busy" | "error"
 
@@ -22,10 +25,12 @@ class StateStream implements StateStreamSink {
   #sessionDirectories: Map<string, string> = new Map()
   #sessionStatuses: Map<string, { status: SessionStatus; error?: string }> = new Map()
   #lastEmittedSessions: Map<string, any> = new Map()
+  #sessionWorktrees: SessionWorktreeMap
 
-  constructor(ds: DurableStreamServer, client: OpencodeClient) {
+  constructor(ds: DurableStreamServer, client: OpencodeClient, sessionWorktrees: SessionWorktreeMap) {
     this.#ds = ds
     this.#client = client
+    this.#sessionWorktrees = sessionWorktrees
   }
 
   async initialize() {
@@ -44,7 +49,10 @@ class StateStream implements StateStreamSink {
 
     // For each project, collect all directories that may contain sessions:
     // the main worktree plus any git worktrees created for parallel sessions.
+    // Also build a reverse map from worktree path → project worktree so we can
+    // populate sessionWorktrees for sessions discovered in worktree directories.
     const allDirectories: string[] = []
+    const worktreePathToProject = new Map<string, string>()
     for (const project of projects.data ?? []) {
       allDirectories.push(project.worktree)
       try {
@@ -53,6 +61,7 @@ class StateStream implements StateStreamSink {
         for (const entry of entries) {
           if (entry.path !== project.worktree) {
             allDirectories.push(entry.path)
+            worktreePathToProject.set(entry.path, project.worktree)
           }
         }
       } catch {
@@ -92,11 +101,32 @@ class StateStream implements StateStreamSink {
       }
     }
 
+
+    // Populate sessionWorktrees for any sessions discovered in worktree
+    // directories that aren't already tracked (e.g. app state stream was lost
+    // or the session was created while the server was down).
+    for (const session of sessions ?? []) {
+      const dir = (session as any).directory as string | undefined
+      if (dir && !this.#sessionWorktrees.has(session.id) && worktreePathToProject.has(dir)) {
+        this.#sessionWorktrees.set(session.id, {
+          worktreePath: dir,
+          projectWorktree: worktreePathToProject.get(dir)!,
+        })
+      }
+    }
+
+    console.log({ worktreePathToProject, sessionWorktrees: this.#sessionWorktrees})
+
     // Load file changes for sessions that have diffs
     for (const session of sessions ?? []) {
       if ((session as any).summary?.files > 0) {
         this.#refetchChanges(session.id)
       }
+    }
+
+    // Emit worktree status for all worktree sessions
+    for (const sessionId of this.#sessionWorktrees.keys()) {
+      this.#emitWorktreeStatus(sessionId)
     }
   }
 
@@ -133,6 +163,10 @@ class StateStream implements StateStreamSink {
     this.#setSessionStatus(sessionId, "idle")
     this.#fullMessageSync(sessionId)
     this.#refetchChanges(sessionId)
+    // Full worktree status refresh — commits happen when the session goes idle
+    if (this.#sessionWorktrees.has(sessionId)) {
+      this.#emitWorktreeStatus(sessionId)
+    }
   }
 
   sessionCompacted(_sessionId: string) {
@@ -227,6 +261,21 @@ class StateStream implements StateStreamSink {
       msg.parts.push(mapped)
     }
     this.#emitMessage(part.messageID)
+
+    // Refresh uncommitted changes status when a file-editing tool completes.
+    // Edits produce staged changes, not commits, so only the uncommitted
+    // changes flag needs updating. Merge status refreshes on sessionIdle
+    // when auto-commits happen.
+    if (
+      part.type === "tool" &&
+      part.state?.status === "completed" &&
+      isFileEditTool(part.tool)
+    ) {
+      const sessionId = msg.sessionId
+      if (this.#sessionWorktrees.has(sessionId)) {
+        this.#debouncedWorktreeStatusRefresh(sessionId, false)
+      }
+    }
   }
 
   messagePartDelta(messageId: string, partId: string, field: string, delta: string) {
@@ -343,6 +392,135 @@ class StateStream implements StateStreamSink {
     } catch {}
   }
 
+  // Debounce timers for worktree status refresh per session
+  #worktreeStatusTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+
+  // Last emitted worktree status per session, used for partial updates
+  #lastWorktreeStatus: Map<string, any> = new Map()
+
+  /** Debounced worktree status refresh — coalesces rapid tool completions. */
+  #debouncedWorktreeStatusRefresh(sessionId: string, fullRefresh: boolean) {
+    const existing = this.#worktreeStatusTimers.get(sessionId)
+    if (existing) clearTimeout(existing)
+    this.#worktreeStatusTimers.set(
+      sessionId,
+      setTimeout(() => {
+        this.#worktreeStatusTimers.delete(sessionId)
+        if (fullRefresh) {
+          this.#emitWorktreeStatus(sessionId)
+        } else {
+          this.#emitUncommittedStatus(sessionId)
+        }
+      }, 2000), // 2s debounce
+    )
+  }
+
+  /**
+   * Compute and emit full worktree status for a session: merge state,
+   * unmerged commits, and uncommitted changes.
+   *
+   * Called during initialization, on sessionIdle, and after merge API operations.
+   */
+  async #emitWorktreeStatus(sessionId: string) {
+    const worktreeInfo = this.#sessionWorktrees.get(sessionId)
+    if (!worktreeInfo) {
+      const value = { sessionId, isWorktreeSession: false }
+      this.#lastWorktreeStatus.set(sessionId, value)
+      this.#appendEvent({
+        type: "worktreeStatus",
+        key: sessionId,
+        value,
+        headers: { operation: "upsert" },
+      })
+      return
+    }
+
+    try {
+      const driver = await WorktreeDriver.open(worktreeInfo.projectWorktree)
+      const branch = await driver.branchForPath(worktreeInfo.worktreePath)
+      if (!branch) {
+        const value = { sessionId, isWorktreeSession: true, error: "Could not resolve branch for worktree" }
+        this.#lastWorktreeStatus.set(sessionId, value)
+        this.#appendEvent({
+          type: "worktreeStatus",
+          key: sessionId,
+          value,
+          headers: { operation: "upsert" },
+        })
+        return
+      }
+
+      const [merged, hasUnmerged, hasUncommitted] = await Promise.all([
+        driver.isMerged(branch, "main"),
+        driver.hasUnmergedCommits(branch, "main"),
+        driver.hasUncommittedChanges(worktreeInfo.worktreePath),
+      ])
+
+      const value = {
+        sessionId,
+        isWorktreeSession: true,
+        branch,
+        merged,
+        hasUnmergedCommits: hasUnmerged,
+        hasUncommittedChanges: hasUncommitted,
+      }
+      this.#lastWorktreeStatus.set(sessionId, value)
+      this.#appendEvent({
+        type: "worktreeStatus",
+        key: sessionId,
+        value,
+        headers: { operation: "upsert" },
+      })
+    } catch (err: any) {
+      const value = { sessionId, isWorktreeSession: true, error: err.message ?? "Failed to check worktree status" }
+      this.#lastWorktreeStatus.set(sessionId, value)
+      this.#appendEvent({
+        type: "worktreeStatus",
+        key: sessionId,
+        value,
+        headers: { operation: "upsert" },
+      })
+    }
+  }
+
+  /**
+   * Lightweight refresh: only update the `hasUncommittedChanges` field.
+   *
+   * Used after edit tool completions where only the working tree changed,
+   * not the commit history. Merges the result into the last-known full status.
+   */
+  async #emitUncommittedStatus(sessionId: string) {
+    const worktreeInfo = this.#sessionWorktrees.get(sessionId)
+    if (!worktreeInfo) return
+
+    try {
+      const driver = await WorktreeDriver.open(worktreeInfo.projectWorktree)
+      const hasUncommitted = await driver.hasUncommittedChanges(worktreeInfo.worktreePath)
+
+      const last = this.#lastWorktreeStatus.get(sessionId) ?? { sessionId, isWorktreeSession: true }
+      const value = { ...last, hasUncommittedChanges: hasUncommitted }
+      this.#lastWorktreeStatus.set(sessionId, value)
+      this.#appendEvent({
+        type: "worktreeStatus",
+        key: sessionId,
+        value,
+        headers: { operation: "upsert" },
+      })
+    } catch (err: any) {
+      console.error(`[StateStream] Failed to refresh uncommitted status for ${sessionId}:`, err)
+    }
+  }
+
+  /**
+   * Public method for API endpoints to trigger a full worktree status refresh
+   * after merge operations.
+   */
+  refreshWorktreeStatus(sessionId: string) {
+    this.#emitWorktreeStatus(sessionId).catch((err) => {
+      console.error(`[StateStream] Failed to refresh worktree status for ${sessionId}:`, err)
+    })
+  }
+
   #appendEvent(event: StateEvent) {
     // console.log('Appending ', event)
     this.#ds.appendToStream("/", JSON.stringify(event), {
@@ -379,4 +557,11 @@ function mapSession(raw: any) {
       updated: raw.time?.updated ?? 0,
     },
   }
+}
+
+/** Tool names that modify files and may result in commits. */
+const FILE_EDIT_TOOLS = new Set(["edit", "write", "bash", "multi_edit"])
+
+function isFileEditTool(toolName: string): boolean {
+  return FILE_EDIT_TOOLS.has(toolName)
 }

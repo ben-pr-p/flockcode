@@ -42,13 +42,6 @@ export async function createApp(opencodeUrl: string) {
   // Unique instance ID for this server boot — clients use this to detect restarts
   const instanceId = generateInstanceId()
 
-  // Single durable stream server for state protocol events
-  const ds = new DurableStreamServer()
-  const stateStream = new StateStream(ds, client)
-  stateStream.initialize().catch((err) => {
-    console.error("Failed to initialize state stream:", err)
-  })
-
   // Persistent app state stream — survives server restarts
   const dataDir = join(homedir(), ".local", "share", "mobile-agents")
   const appStore = new FileBackedStreamStore({ dataDir })
@@ -73,6 +66,14 @@ export async function createApp(opencodeUrl: string) {
   } catch {
     // Stream may be empty on first boot — that's fine
   }
+
+  // Single durable stream server for state protocol events.
+  // Created after sessionWorktrees so initialization can emit merge status.
+  const ds = new DurableStreamServer()
+  const stateStream = new StateStream(ds, client, sessionWorktrees)
+  stateStream.initialize().catch((err) => {
+    console.error("Failed to initialize state stream:", err)
+  })
 
   // Subscribe to opencode events and route them to the state stream
   opencode.spawnListener((event) => handleOpencodeEvent(event, stateStream), opencodeUrl).catch((err) => {
@@ -391,6 +392,86 @@ export async function createApp(opencodeUrl: string) {
         headers: { operation: "upsert" },
       }), { contentType: "application/json" })
       return c.json({ success: true })
+    })
+
+    /**
+     * Check the merge status for a worktree session.
+     *
+     * Returns whether the worktree branch has been merged into main and
+     * whether there are unmerged commits. Uses `git branch --merged` which
+     * works reliably for --no-ff merges (our default).
+     */
+    .get("/sessions/:sessionId/merge-status", async (c) => {
+      const sessionId = c.req.param("sessionId")
+      const worktreeInfo = sessionWorktrees.get(sessionId)
+      if (!worktreeInfo) {
+        return c.json({ isWorktreeSession: false })
+      }
+
+      try {
+        const driver = await WorktreeDriver.open(worktreeInfo.projectWorktree)
+        const branch = await driver.branchForPath(worktreeInfo.worktreePath)
+        if (!branch) {
+          return c.json({ isWorktreeSession: true, error: "Could not resolve branch for worktree" })
+        }
+
+        const merged = await driver.isMerged(branch, "main")
+        const hasUnmerged = await driver.hasUnmergedCommits(branch, "main")
+
+        return c.json({
+          isWorktreeSession: true,
+          branch,
+          merged,
+          hasUnmergedCommits: hasUnmerged,
+        })
+      } catch (err: any) {
+        console.error(`[GET /api/sessions/${sessionId}/merge-status]`, err)
+        return c.json({ isWorktreeSession: true, error: err.message ?? "Failed to check merge status" })
+      }
+    })
+
+    /**
+     * Merge a worktree session's branch into main.
+     *
+     * Performs a dry-run first to check for conflicts. If conflicts are
+     * detected, returns an error with the list of conflicting files so the
+     * user can instruct the agent to rebase and resolve them.
+     */
+    .post("/sessions/:sessionId/merge", async (c) => {
+      const sessionId = c.req.param("sessionId")
+      const worktreeInfo = sessionWorktrees.get(sessionId)
+      if (!worktreeInfo) {
+        return c.json({ error: "Session does not have an associated worktree" }, 400)
+      }
+
+      try {
+        const driver = await WorktreeDriver.open(worktreeInfo.projectWorktree)
+        const branch = await driver.branchForPath(worktreeInfo.worktreePath)
+        if (!branch) {
+          return c.json({ error: "Could not resolve branch for worktree" }, 400)
+        }
+
+        // Dry-run: check for conflicts before attempting the real merge
+        const check = await driver.canMerge(branch, "main")
+        if (!check.ok) {
+          return c.json({
+            error: "Merge would conflict",
+            reason: check.reason,
+            conflictingFiles: check.conflictingFiles,
+          }, 409)
+        }
+
+        // Real merge: --no-ff into main (default)
+        await driver.merge(branch, { into: "main" })
+
+        // Push updated worktree status through the stream
+        stateStream.refreshWorktreeStatus(sessionId)
+
+        return c.json({ success: true, branch })
+      } catch (err: any) {
+        console.error(`[POST /api/sessions/${sessionId}/merge]`, err)
+        return c.json({ error: err.message ?? "Merge failed" }, 500)
+      }
     })
 
   const routes = app.route("/api", api)

@@ -9,6 +9,7 @@ import { VoiceInputArea } from './VoiceInputArea'
 import type { SessionValue, UIMessage as Message } from '../lib/stream-db'
 import type { ChangedFile } from '../lib/stream-db'
 import type { RecordingState } from '../hooks/useAudioRecorder'
+import type { WorktreeStatusValue } from '../lib/stream-db'
 
 interface SessionScreenProps {
   sessionId: string
@@ -36,6 +37,12 @@ interface SessionScreenProps {
   onModelPress?: () => void
   /** Optional toggle element rendered below the empty message (e.g. worktree option) */
   worktreeToggle?: React.ReactNode
+  /** Worktree status for worktree sessions. */
+  worktreeStatus?: WorktreeStatusValue
+  /** Whether a merge operation is in progress. */
+  isMerging?: boolean
+  /** Callback to trigger a merge. */
+  onMerge?: () => void
 }
 
 export function SessionScreen({
@@ -57,6 +64,9 @@ export function SessionScreen({
   modelName,
   onModelPress,
   worktreeToggle,
+  worktreeStatus,
+  isMerging,
+  onMerge,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -74,6 +84,9 @@ export function SessionScreen({
         relativeTime={formatRelativeTime(session.time.updated)}
         onMenuPress={onMenuPress}
         onProjectsPress={onProjectsPress}
+        worktreeStatus={worktreeStatus}
+        isMerging={isMerging}
+        onMerge={onMerge}
       />
 
       <TabBar activeTab={activeTab} onTabChange={onTabChange} />

@@ -49,8 +49,18 @@ export interface MergeOptions {
   into?: string;
   /** Use `--squash` to collapse all commits into a single merge commit. */
   squash?: boolean;
-  /** Use `--no-ff` to force a merge commit even for fast-forward merges. */
+  /** Use `--no-ff` to force a merge commit even for fast-forward merges. Defaults to `true`. */
   noFf?: boolean;
+}
+
+/** Result of a merge dry-run check via {@link WorktreeDriver.canMerge}. */
+export interface MergeCheck {
+  /** Whether the merge can proceed without conflicts. */
+  ok: boolean;
+  /** Human-readable reason when `ok` is false. */
+  reason?: string;
+  /** List of conflicting file paths (empty if no conflicts). */
+  conflictingFiles: string[];
 }
 
 /** Options for {@link WorktreeDriver.remove}. */
@@ -159,22 +169,115 @@ export class WorktreeDriver {
   }
 
   /**
+   * Resolve the branch name for a worktree path.
+   *
+   * Returns the short branch name (e.g. `worktree/abc123`) or `null` if the
+   * path doesn't correspond to a known worktree or is in detached HEAD state.
+   */
+  async branchForPath(worktreePath: string): Promise<string | null> {
+    const entries = await this.list();
+    const entry = entries.find((e) => e.path === worktreePath);
+    if (!entry?.branch) return null;
+    return entry.branch.replace(/^refs\/heads\//, "");
+  }
+
+  /**
+   * Check whether a branch has been merged into the target branch.
+   *
+   * Uses `git branch --merged <target>` which works reliably for real merges
+   * and fast-forwards (but NOT for squash merges).
+   */
+  async isMerged(branch: string, into: string = "main"): Promise<boolean> {
+    const output = await this.#execText(["git", "branch", "--merged", into]);
+    const mergedBranches = output
+      .split("\n")
+      // Strip leading markers: * (current branch), + (checked out in linked worktree)
+      .map((line) => line.replace(/^[*+]?\s+/, "").trim())
+      .filter(Boolean);
+    return mergedBranches.includes(branch);
+  }
+
+  /**
+   * Check whether a worktree branch has unmerged commits relative to a target.
+   *
+   * Returns `true` if there are commits on `branch` that aren't reachable from `into`.
+   */
+  async hasUnmergedCommits(branch: string, into: string = "main"): Promise<boolean> {
+    const output = await this.#execText(["git", "log", `${into}..${branch}`, "--oneline"]);
+    return output.trim().length > 0;
+  }
+
+  /**
+   * Check whether a worktree directory has uncommitted changes (staged or unstaged).
+   *
+   * Runs `git status --porcelain` in the worktree directory. Returns `true` if
+   * there is any output (meaning dirty working tree or staged changes).
+   */
+  async hasUncommittedChanges(worktreePath: string): Promise<boolean> {
+    const output = await this.#execTextIn(worktreePath, ["git", "status", "--porcelain"]);
+    return output.trim().length > 0;
+  }
+
+  /**
+   * Dry-run a merge to check for conflicts without modifying the working tree.
+   *
+   * Attempts `git merge --no-commit --no-ff`, inspects the result, then aborts.
+   * The main worktree is left clean regardless of the outcome.
+   */
+  async canMerge(branch: string, into: string = "main"): Promise<MergeCheck> {
+    // Ensure we're on the target branch
+    await this.#exec(["git", "checkout", into]);
+
+    try {
+      await this.#exec(["git", "merge", "--no-commit", "--no-ff", branch]);
+      // Merge succeeded — abort to leave tree clean
+      await this.#exec(["git", "merge", "--abort"]);
+      return { ok: true, conflictingFiles: [] };
+    } catch (err) {
+      // Merge failed — check for conflicts, then abort
+      let conflictingFiles: string[] = [];
+      try {
+        const output = await this.#execText(["git", "diff", "--name-only", "--diff-filter=U"]);
+        conflictingFiles = output.split("\n").map((f) => f.trim()).filter(Boolean);
+      } catch {
+        // Could not list conflicts — that's fine, we still report the failure
+      }
+      try {
+        await this.#exec(["git", "merge", "--abort"]);
+      } catch {
+        // Abort may fail if merge didn't start — ignore
+      }
+
+      const reason = conflictingFiles.length > 0
+        ? `Merge conflicts in: ${conflictingFiles.join(", ")}`
+        : err instanceof WorktreeError
+          ? err.stderr
+          : "Merge would fail";
+
+      return { ok: false, reason, conflictingFiles };
+    }
+  }
+
+  /**
    * Merge a worktree's branch into another branch.
    *
    * This does NOT operate inside the worktree itself — it runs from the main
    * repo root and merges `branch` into the target (default: current branch).
+   * Defaults to `--no-ff` so that merge state is discoverable via
+   * `git branch --merged`.
    */
   async merge(branch: string, options: MergeOptions = {}): Promise<void> {
-    const { into, squash = false, noFf = false } = options;
+    const { into, squash = false, noFf = !squash } = options;
 
     // If merging into a specific branch, check it out first in the main worktree
     if (into) {
       await this.#exec(["git", "checkout", into]);
     }
 
-    const args = ["git", "merge"];
+    const args = ["git", "merge", "--no-edit"];
     if (squash) args.push("--squash");
-    if (noFf) args.push("--no-ff");
+    // --squash and --no-ff are mutually exclusive in git
+    if (noFf && !squash) args.push("--no-ff");
     args.push(branch);
 
     await this.#exec(args);
@@ -264,8 +367,13 @@ export class WorktreeDriver {
 
   /** Execute a git command and return stdout as a string. */
   async #execText(args: string[]): Promise<string> {
+    return this.#execTextIn(this.#repoRoot, args);
+  }
+
+  /** Execute a git command in a specific directory and return stdout as a string. */
+  async #execTextIn(cwd: string, args: string[]): Promise<string> {
     const proc = Bun.spawn(args, {
-      cwd: this.#repoRoot,
+      cwd,
       stdout: "pipe",
       stderr: "pipe",
     });

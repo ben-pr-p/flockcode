@@ -1,8 +1,8 @@
 import React, { useState } from 'react'
-import { View, Text, Pressable, Modal, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, Pressable, Modal, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
-import { Menu, FolderOpen, Settings, X } from 'lucide-react-native'
+import { Menu, FolderOpen, Settings, X, GitMerge, Check, CircleDot } from 'lucide-react-native'
 import { SessionHeader } from './SessionHeader'
 import { TabBar } from './TabBar'
 import { ChatThread } from './ChatThread'
@@ -14,6 +14,7 @@ import type { ChangedFile } from '../lib/stream-db'
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings'
 import type { LeftPanelContent } from '../state/ui'
 import type { RecordingState } from '../hooks/useAudioRecorder'
+import type { WorktreeStatusValue } from '../lib/stream-db'
 
 interface SplitLayoutProps {
   sessionId: string
@@ -49,6 +50,12 @@ interface SplitLayoutProps {
   }
   modelName: string
   onModelPress?: () => void
+  /** Worktree status for worktree sessions. */
+  worktreeStatus?: WorktreeStatusValue
+  /** Whether a merge operation is in progress. */
+  isMerging?: boolean
+  /** Callback to trigger a merge. */
+  onMerge?: () => void
 }
 
 export function SplitLayout({
@@ -67,6 +74,9 @@ export function SplitLayout({
   settings,
   modelName,
   onModelPress,
+  worktreeStatus,
+  isMerging,
+  onMerge,
 }: SplitLayoutProps) {
   const insets = useSafeAreaInsets()
   const { colorScheme } = useColorScheme()
@@ -146,7 +156,7 @@ export function SplitLayout({
         </View>
       </View>
 
-      {/* Subheader bar with branch + close button */}
+      {/* Subheader bar with branch + merge/close buttons */}
       <View className="h-8 flex-row items-center justify-between px-4 border-b border-stone-200 dark:border-stone-800">
         <View className="flex-row items-center gap-1.5">
           <Text className="text-xs text-stone-700 dark:text-stone-400">
@@ -157,15 +167,24 @@ export function SplitLayout({
             {formatRelativeTime(session.time.updated)}
           </Text>
         </View>
-        {leftPanel.type !== 'changes' && (
-          <Pressable
-            onPress={handleCloseLeftPanel}
-            className="w-7 h-7 items-center justify-center"
-            hitSlop={8}
-          >
-            <X size={16} color={mutedIconColor} />
-          </Pressable>
-        )}
+        <View className="flex-row items-center gap-2">
+          {worktreeStatus?.isWorktreeSession && !worktreeStatus.error && (
+            <SplitWorktreeStatusBadge
+              worktreeStatus={worktreeStatus}
+              isMerging={!!isMerging}
+              onMerge={onMerge}
+            />
+          )}
+          {leftPanel.type !== 'changes' && (
+            <Pressable
+              onPress={handleCloseLeftPanel}
+              className="w-7 h-7 items-center justify-center"
+              hitSlop={8}
+            >
+              <X size={16} color={mutedIconColor} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* Split pane content */}
@@ -260,6 +279,69 @@ export function SplitLayout({
       </Modal>
     </View>
   )
+}
+
+/** Compact worktree status badge for the SplitLayout subheader. */
+function SplitWorktreeStatusBadge({
+  worktreeStatus,
+  isMerging,
+  onMerge,
+}: {
+  worktreeStatus: WorktreeStatusValue
+  isMerging: boolean
+  onMerge?: () => void
+}) {
+  const { colorScheme } = useColorScheme()
+
+  if (isMerging) {
+    return (
+      <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-stone-200 dark:bg-stone-800">
+        <ActivityIndicator size="small" color={colorScheme === 'dark' ? '#A8A29E' : '#44403C'} />
+        <Text className="text-[10px] text-stone-500 dark:text-stone-400" style={{ fontFamily: 'JetBrains Mono' }}>
+          Merging...
+        </Text>
+      </View>
+    )
+  }
+
+  if (worktreeStatus.hasUncommittedChanges) {
+    return (
+      <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30">
+        <CircleDot size={10} color={colorScheme === 'dark' ? '#fbbf24' : '#d97706'} />
+        <Text className="text-[10px] text-amber-700 dark:text-amber-400" style={{ fontFamily: 'JetBrains Mono' }}>
+          Uncommitted
+        </Text>
+      </View>
+    )
+  }
+
+  if (worktreeStatus.hasUnmergedCommits) {
+    return (
+      <Pressable
+        onPress={onMerge}
+        className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 active:opacity-70"
+        hitSlop={4}
+      >
+        <GitMerge size={10} color={colorScheme === 'dark' ? '#60a5fa' : '#2563eb'} />
+        <Text className="text-[10px] text-blue-700 dark:text-blue-400" style={{ fontFamily: 'JetBrains Mono' }}>
+          Merge
+        </Text>
+      </Pressable>
+    )
+  }
+
+  if (worktreeStatus.merged) {
+    return (
+      <View className="flex-row items-center gap-1 px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30">
+        <Check size={10} color={colorScheme === 'dark' ? '#4ade80' : '#16a34a'} />
+        <Text className="text-[10px] text-green-700 dark:text-green-400" style={{ fontFamily: 'JetBrains Mono' }}>
+          Merged
+        </Text>
+      </View>
+    )
+  }
+
+  return null
 }
 
 function formatRelativeTime(timestamp: number): string {

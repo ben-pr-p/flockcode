@@ -223,6 +223,191 @@ describe("merge", () => {
 });
 
 // ---------------------------------------------------------------------------
+// branchForPath
+// ---------------------------------------------------------------------------
+
+describe("branchForPath", () => {
+  test("resolves the branch name for a worktree path", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "branch-lookup");
+    await driver.create("feat/branch-lookup", { path: wtPath });
+
+    const branch = await driver.branchForPath(wtPath);
+    expect(branch).toBe("feat/branch-lookup");
+  });
+
+  test("returns null for an unknown path", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const branch = await driver.branchForPath("/nonexistent/path");
+    expect(branch).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isMerged / hasUnmergedCommits
+// ---------------------------------------------------------------------------
+
+describe("isMerged", () => {
+  test("returns false before merge", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "unmerged");
+    await driver.create("unmerged-branch", { path: wtPath });
+    await $`git commit --allow-empty -m "unmerged work"`.quiet().cwd(wtPath);
+
+    expect(await driver.isMerged("unmerged-branch", "main")).toBe(false);
+  });
+
+  test("returns true after --no-ff merge", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "merged-noff");
+    await driver.create("merged-noff-branch", { path: wtPath });
+    await $`git commit --allow-empty -m "to merge"`.quiet().cwd(wtPath);
+
+    await driver.merge("merged-noff-branch", { into: "main" });
+
+    expect(await driver.isMerged("merged-noff-branch", "main")).toBe(true);
+  });
+});
+
+describe("hasUnmergedCommits", () => {
+  test("returns true when branch has commits not in main", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "has-unmerged");
+    await driver.create("has-unmerged-branch", { path: wtPath });
+    await $`git commit --allow-empty -m "new work"`.quiet().cwd(wtPath);
+
+    expect(await driver.hasUnmergedCommits("has-unmerged-branch", "main")).toBe(true);
+  });
+
+  test("returns false after merge with no new commits", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "no-unmerged");
+    await driver.create("no-unmerged-branch", { path: wtPath });
+    await $`git commit --allow-empty -m "work"`.quiet().cwd(wtPath);
+
+    await driver.merge("no-unmerged-branch", { into: "main" });
+
+    expect(await driver.hasUnmergedCommits("no-unmerged-branch", "main")).toBe(false);
+  });
+
+  test("returns true after merge when new commits added", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "post-merge-work");
+    await driver.create("post-merge-branch", { path: wtPath });
+    await $`git commit --allow-empty -m "first work"`.quiet().cwd(wtPath);
+
+    await driver.merge("post-merge-branch", { into: "main" });
+    // Add more work after merge
+    await $`git commit --allow-empty -m "more work"`.quiet().cwd(wtPath);
+
+    expect(await driver.hasUnmergedCommits("post-merge-branch", "main")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canMerge
+// ---------------------------------------------------------------------------
+
+describe("canMerge", () => {
+  test("returns ok:true for a clean merge", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "clean-merge");
+    await driver.create("clean-merge-branch", { path: wtPath });
+    await $`bash -c 'echo "hello" > clean.txt && git add clean.txt && git commit -m "clean change"'`
+      .quiet()
+      .cwd(wtPath);
+
+    const result = await driver.canMerge("clean-merge-branch", "main");
+    expect(result.ok).toBe(true);
+    expect(result.conflictingFiles).toEqual([]);
+  });
+
+  test("returns ok:false with conflicting files", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "conflict-merge");
+    await driver.create("conflict-merge-branch", { path: wtPath });
+
+    // Create a conflicting change on both branches
+    await $`bash -c 'echo "main content" > conflict.txt && git add conflict.txt && git commit -m "main change"'`
+      .quiet()
+      .cwd(repoDir);
+    await $`bash -c 'echo "worktree content" > conflict.txt && git add conflict.txt && git commit -m "worktree change"'`
+      .quiet()
+      .cwd(wtPath);
+
+    const result = await driver.canMerge("conflict-merge-branch", "main");
+    expect(result.ok).toBe(false);
+    expect(result.conflictingFiles).toContain("conflict.txt");
+  });
+
+  test("leaves main worktree clean after dry-run", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "clean-after-dryrun");
+    await driver.create("dryrun-branch", { path: wtPath });
+    await $`bash -c 'echo "change" > dryrun.txt && git add dryrun.txt && git commit -m "dryrun change"'`
+      .quiet()
+      .cwd(wtPath);
+
+    await driver.canMerge("dryrun-branch", "main");
+
+    // Main worktree should be clean (no uncommitted changes, no merge in progress)
+    const status = await $`git status --porcelain`.quiet().cwd(repoDir);
+    expect(status.text().trim()).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasUncommittedChanges
+// ---------------------------------------------------------------------------
+
+describe("hasUncommittedChanges", () => {
+  test("returns false for a clean worktree", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "clean-wt");
+    await driver.create("clean-wt-branch", { path: wtPath });
+
+    expect(await driver.hasUncommittedChanges(wtPath)).toBe(false);
+  });
+
+  test("returns true for staged changes", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "staged-wt");
+    await driver.create("staged-wt-branch", { path: wtPath });
+    await $`bash -c 'echo "staged" > staged.txt && git add staged.txt'`
+      .quiet()
+      .cwd(wtPath);
+
+    expect(await driver.hasUncommittedChanges(wtPath)).toBe(true);
+  });
+
+  test("returns true for unstaged changes", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "unstaged-wt");
+    await driver.create("unstaged-wt-branch", { path: wtPath });
+    // Create and commit a file first, then modify it
+    await $`bash -c 'echo "original" > unstaged.txt && git add unstaged.txt && git commit -m "add file"'`
+      .quiet()
+      .cwd(wtPath);
+    await $`bash -c 'echo "modified" > unstaged.txt'`
+      .quiet()
+      .cwd(wtPath);
+
+    expect(await driver.hasUncommittedChanges(wtPath)).toBe(true);
+  });
+
+  test("returns false after all changes are committed", async () => {
+    const driver = await WorktreeDriver.open(repoDir);
+    const wtPath = join(tempBase, "committed-wt");
+    await driver.create("committed-wt-branch", { path: wtPath });
+    await $`bash -c 'echo "content" > file.txt && git add file.txt && git commit -m "committed"'`
+      .quiet()
+      .cwd(wtPath);
+
+    expect(await driver.hasUncommittedChanges(wtPath)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // remove
 // ---------------------------------------------------------------------------
 
