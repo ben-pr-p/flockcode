@@ -16,6 +16,8 @@ import { SearchToolCollapsed, SearchToolExpanded } from './SearchTool'
 import { TaskToolCollapsed, TaskToolExpanded } from './TaskTool'
 import { WebToolCollapsed, WebToolExpanded } from './WebTool'
 import { TodoToolCollapsed, TodoToolExpanded } from './TodoTool'
+import { QuestionToolCollapsed, QuestionToolExpanded } from './QuestionTool'
+import { SkillToolCollapsed, SkillToolExpanded } from './SkillTool'
 
 export type { ToolCallProps } from './types'
 
@@ -43,6 +45,8 @@ const registry: Record<string, ToolCallRenderers> = {
   websearch:   { Collapsed: WebToolCollapsed,    Expanded: WebToolExpanded },
   codesearch:  { Collapsed: WebToolCollapsed,    Expanded: WebToolExpanded },
   todowrite:   { Collapsed: TodoToolCollapsed,   Expanded: TodoToolExpanded },
+  question:    { Collapsed: QuestionToolCollapsed, Expanded: QuestionToolExpanded },
+  skill:       { Collapsed: SkillToolCollapsed,   Expanded: SkillToolExpanded },
 }
 
 const defaultRenderers: ToolCallRenderers = {
