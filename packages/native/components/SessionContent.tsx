@@ -297,7 +297,9 @@ export function SessionView({
           changes={changes}
           onMenuPress={onMenuPress}
           onProjectsPress={onProjectsPress}
-          onToolCallPress={() => {}}
+          onToolCallPress={(messageId) => {
+            // Tool call press is handled internally by SplitLayout
+          }}
           onSend={handleSend}
           isSending={isSending}
           audioRecorder={audioRecorder}
