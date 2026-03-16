@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { View, Text, Pressable, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
@@ -57,13 +57,43 @@ export function VoiceInputArea({
   const micIconColor = isDark ? '#0C0A09' : '#FAFAF9'
   const selectorColor = isDark ? '#57534E' : '#A8A29E'
 
-  // Hold to record — release to stop and send.
+  // Tap: starts recording, locked on — tap again to stop.
+  // Hold (>300ms): starts recording — release to stop.
+  const pressInTimeRef = useRef(0)
+  const [locked, setLocked] = useState(false)
+  // Ref guards against the race condition where handlePressIn stops a locked
+  // recording and handlePressOut fires in the same gesture, seeing stale state.
+  const handledRef = useRef(false)
+
   const handlePressIn = useCallback(() => {
+    handledRef.current = false
+
+    if (recordingState === 'recording' && locked) {
+      // Tap to stop locked recording
+      handledRef.current = true
+      setLocked(false)
+      onMicPressOut()
+      return
+    }
+
+    pressInTimeRef.current = Date.now()
     onMicPressIn()
-  }, [onMicPressIn])
+  }, [recordingState, locked, onMicPressIn, onMicPressOut])
 
   const handlePressOut = useCallback(() => {
+    // If we already handled this gesture in handlePressIn (stopped a locked
+    // recording), skip so we don't double-fire.
+    if (handledRef.current) return
     if (recordingState !== 'recording') return
+
+    const holdDuration = Date.now() - pressInTimeRef.current
+    if (holdDuration < 300) {
+      // Quick tap — lock recording on, user will tap again to stop
+      setLocked(true)
+      return
+    }
+
+    // Long hold — release to stop
     onMicPressOut()
   }, [recordingState, onMicPressOut])
 
@@ -139,7 +169,7 @@ export function VoiceInputArea({
           </Pressable>
         </View>
 
-        {/* Mic button — hold to record, release to send */}
+        {/* Mic button — tap to lock record, hold to record */}
         <Pressable
           onPressIn={handlePressIn}
           onPressOut={handlePressOut}
@@ -171,7 +201,7 @@ export function VoiceInputArea({
           className="text-center text-xs text-stone-500 dark:text-stone-400 mt-1 mb-1"
           style={{ fontFamily: 'JetBrains Mono' }}
         >
-          {'recording · release to send'}
+          {locked ? 'recording · tap to send' : 'recording · release to send'}
         </Text>
       )}
     </View>

@@ -4,6 +4,12 @@
       "eas": {
         "projectId": "d30d82fc-c423-4af3-badd-5627264827df"
       }
+    },
+    "ios": {
+      "bundleIdentifier": "com.bprp.mobileagents",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     }
   }
 }
