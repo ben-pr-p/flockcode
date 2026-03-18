@@ -9,6 +9,7 @@
 import { homedir } from "node:os"
 import { relative, join, dirname, basename } from "node:path"
 import { createHash } from "node:crypto"
+import { ExecError } from "@fly/sprites"
 import type { SpriteClient } from "./sprites"
 import type { OpencodeClient } from "./opencode"
 import type { Project } from "@opencode-ai/sdk"
@@ -66,17 +67,17 @@ export interface SyncOptions {
  * Map a local absolute path to the corresponding Sprite path by stripping
  * the local home directory prefix and re-rooting under the Sprite home.
  *
+ * Returns `null` if the path is outside the home directory.
+ *
  * ```
  * localPathToSpritePath("/Users/ben/job1/project", "/Users/ben", "/home/sprite")
  * // → "/home/sprite/job1/project"
  * ```
  */
-export function localPathToSpritePath(localPath: string, localHome: string, spriteHome: string): string {
+export function localPathToSpritePath(localPath: string, localHome: string, spriteHome: string): string | null {
   const rel = relative(localHome, localPath)
   if (rel.startsWith("..")) {
-    // Path is outside the home directory — fall back to using just the
-    // directory name to avoid weirdly deep paths.
-    return join(spriteHome, basename(localPath))
+    return null
   }
   return join(spriteHome, rel)
 }
@@ -150,14 +151,21 @@ export async function sync(
     const spritePath = localPathToSpritePath(localPath, localHome, spriteHome)
     const relPath = relative(localHome, localPath)
 
+    if (!spritePath) {
+      const warning = `  ⚠ ${localPath} — outside home directory, skipping`
+      log(warning)
+      result.warnings.push(warning)
+      continue
+    }
+
     log(`  ${relPath}`)
 
     // Get the local git remote URL
     const remoteUrl = await getLocalGitRemoteUrl(localPath)
     if (!remoteUrl) {
-      const warning = `  ⚠ ${relPath} — could not determine git remote URL, skipping`
+      const warning = `    ⚠ could not determine git remote URL, skipping`
       log(warning)
-      result.warnings.push(warning)
+      result.warnings.push(`${relPath} — could not determine git remote URL`)
       continue
     }
 
@@ -166,16 +174,16 @@ export async function sync(
 
     if (existsOnSprite) {
       // Verify the remote URL matches
-      const spriteRemoteUrl = await sprite.tryExec(
-        `git -C ${shellQuote(spritePath)} remote get-url origin`,
+      const spriteRemoteUrl = await sprite.tryExecFile(
+        "git", ["-C", spritePath, "remote", "get-url", "origin"],
       )
 
       if (spriteRemoteUrl && normalizeRemoteUrl(spriteRemoteUrl.trim()) !== normalizeRemoteUrl(remoteUrl)) {
         const warning =
-          `  ⚠ ${relPath} — remote URL mismatch on Sprite ` +
+          `    ⚠ remote URL mismatch on Sprite ` +
           `(local: ${remoteUrl}, sprite: ${spriteRemoteUrl.trim()}), skipping`
         log(warning)
-        result.warnings.push(warning)
+        result.warnings.push(`${relPath} — remote URL mismatch`)
         continue
       }
 
@@ -187,35 +195,33 @@ export async function sync(
         log(`    → would clone ${remoteUrl}`)
       } else {
         const parentDir = dirname(spritePath)
-        await sprite.exec(`mkdir -p ${shellQuote(parentDir)}`)
+        await sprite.execFile("mkdir", ["-p", parentDir])
 
-        log(`    cloning...`)
+        log(`    cloning ${remoteUrl}...`)
         try {
-          await sprite.exec(
-            `git clone ${shellQuote(remoteUrl)} ${shellQuote(spritePath)}`,
-          )
+          await sprite.execFile("git", ["clone", remoteUrl, spritePath])
           log(`    ✓ cloned`)
-        } catch (err: any) {
-          const warning = `  ⚠ ${relPath} — clone failed: ${err.message ?? err}`
+        } catch (err: unknown) {
+          const stderr = err instanceof ExecError
+            ? (typeof err.stderr === "string" ? err.stderr : err.stderr.toString("utf-8")).trim()
+            : ""
+          const detail = stderr || (err instanceof Error ? err.message : String(err))
+          const warning = `    ⚠ clone failed: ${detail}`
           log(warning)
-          result.warnings.push(warning)
+          result.warnings.push(`${relPath} — clone failed: ${detail}`)
           continue
         }
       }
       result.cloned.push({ projectId, localPath, spritePath })
     }
 
-    if (remoteUrl) {
-      remoteUrlToSpritePath.set(normalizeRemoteUrl(remoteUrl), spritePath)
-    }
+    remoteUrlToSpritePath.set(normalizeRemoteUrl(remoteUrl), spritePath)
 
     // Sync .sprite-keep files
     await syncSpriteKeepFiles(sprite, projectId, localPath, spritePath, dryRun, log, result)
   }
 
   // 5. Detect orphaned projects on the Sprite
-  //    We check for directories in the Sprite home that look like git repos
-  //    but don't correspond to any local project.
   await detectOrphans(sprite, projects, localHome, spriteHome, remoteUrlToSpritePath, log, result)
 
   return result
@@ -234,7 +240,6 @@ async function syncSpriteKeepFiles(
   log: (msg: string) => void,
   result: SyncResult,
 ): Promise<void> {
-  // Read the local .sprite-keep file
   const keepFilePath = join(localPath, ".sprite-keep")
   const keepFile = Bun.file(keepFilePath)
   const keepExists = await keepFile.exists()
@@ -254,7 +259,6 @@ async function syncSpriteKeepFiles(
 
   log(`    syncing .sprite-keep files...`)
 
-  // Resolve each pattern — support globs via Bun.Glob
   for (const pattern of patterns) {
     const glob = new Bun.Glob(pattern)
     const matches = glob.scanSync({ cwd: localPath, absolute: false, dot: true })
@@ -265,7 +269,6 @@ async function syncSpriteKeepFiles(
       const localFilePath = join(localPath, relFile)
       const spriteFilePath = join(spritePath, relFile)
 
-      // Read local file
       const localFile = Bun.file(localFilePath)
       const localExists = await localFile.exists()
       if (!localExists) {
@@ -276,12 +279,13 @@ async function syncSpriteKeepFiles(
       const localBytes = new Uint8Array(await localFile.arrayBuffer())
       const localHash = md5(localBytes)
 
-      // Check if the file on the Sprite is already up to date
-      const spriteHash = await sprite.tryExec(
-        `md5sum ${shellQuote(spriteFilePath)} 2>/dev/null | awk '{print $1}'`,
-      )
+      // Check if the file on the Sprite is already up to date via md5sum.
+      // This needs a pipe so we use execBash.
+      const spriteHash = await sprite.execBash(
+        `md5sum '${spriteFilePath.replace(/'/g, "'\\''")}' 2>/dev/null | awk '{print $1}'`,
+      ).then((s) => s.trim()).catch(() => null)
 
-      if (spriteHash && spriteHash.trim() === localHash) {
+      if (spriteHash && spriteHash === localHash) {
         log(`      ✓ ${relFile} — up to date`)
         result.filesSkipped.push({ projectId, file: relFile, reason: "up to date" })
         continue
@@ -295,9 +299,8 @@ async function syncSpriteKeepFiles(
 
       // Ensure parent directory exists on Sprite
       const spriteFileDir = dirname(spriteFilePath)
-      await sprite.exec(`mkdir -p ${shellQuote(spriteFileDir)}`)
+      await sprite.execFile("mkdir", ["-p", spriteFileDir])
 
-      // Upload the file
       try {
         await sprite.writeFile(spriteFilePath, localBytes)
         log(`      ✓ ${relFile} — uploaded`)
@@ -330,13 +333,14 @@ async function detectOrphans(
 ): Promise<void> {
   // Build set of expected Sprite paths
   const expectedPaths = new Set(
-    projects.map((p) => localPathToSpritePath(p.worktree, localHome, spriteHome)),
+    projects
+      .map((p) => localPathToSpritePath(p.worktree, localHome, spriteHome))
+      .filter((p): p is string => p !== null),
   )
 
-  // List top-level directories on the Sprite home that contain .git
-  // We do a shallow scan — find directories with a .git subfolder up to 3 levels deep
-  const findResult = await sprite.tryExec(
-    `find ${shellQuote(spriteHome)} -maxdepth 4 -name .git -type d 2>/dev/null`,
+  // Find git repos on the Sprite up to 4 levels deep
+  const findResult = await sprite.tryExecFile(
+    "find", [spriteHome, "-maxdepth", "4", "-name", ".git", "-type", "d"],
   )
 
   if (!findResult) return
@@ -345,13 +349,14 @@ async function detectOrphans(
     .trim()
     .split("\n")
     .filter(Boolean)
-    .map((gitDir) => dirname(gitDir)) // /home/sprite/job1/project/.git → /home/sprite/job1/project
+    .map((gitDir) => dirname(gitDir))
 
   for (const dir of gitDirs) {
     if (expectedPaths.has(dir)) continue
 
-    // Check if this repo's remote URL matches a known project at a different path
-    const remoteUrl = await sprite.tryExec(`git -C ${shellQuote(dir)} remote get-url origin 2>/dev/null`)
+    const remoteUrl = await sprite.tryExecFile(
+      "git", ["-C", dir, "remote", "get-url", "origin"],
+    )
     const normalizedUrl = remoteUrl ? normalizeRemoteUrl(remoteUrl.trim()) : null
     const knownPath = normalizedUrl ? remoteUrlToSpritePath.get(normalizedUrl) : null
 
@@ -392,13 +397,6 @@ async function getLocalGitRemoteUrl(repoPath: string): Promise<string | null> {
 /**
  * Normalize a git remote URL for comparison.
  * Strips trailing `.git`, protocol differences, and trailing slashes.
- *
- * ```
- * normalizeRemoteUrl("git@github.com:user/repo.git")
- * // → "github.com:user/repo"
- * normalizeRemoteUrl("https://github.com/user/repo.git")
- * // → "github.com/user/repo"
- * ```
  */
 function normalizeRemoteUrl(url: string): string {
   return url
@@ -412,9 +410,4 @@ function normalizeRemoteUrl(url: string): string {
 /** Compute the MD5 hex digest of a byte array. */
 function md5(data: Uint8Array): string {
   return createHash("md5").update(data).digest("hex")
-}
-
-/** Escape a string for safe use in a shell command. */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`
 }

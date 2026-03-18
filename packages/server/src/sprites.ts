@@ -52,6 +52,11 @@ export class SpriteClient {
 
   /**
    * Run a command on the Sprite and return stdout as a string.
+   *
+   * **Note:** The Sprites SDK splits the command string on whitespace and
+   * executes directly — no shell is involved. Shell features like `$VAR`,
+   * pipes, `&&`/`||` will NOT work. Use {@link execBash} if you need a shell.
+   *
    * Throws {@link ExecError} on non-zero exit.
    */
   async exec(command: string, options?: { cwd?: string }): Promise<string> {
@@ -62,8 +67,49 @@ export class SpriteClient {
   }
 
   /**
+   * Run a command with explicit arguments on the Sprite. Unlike {@link exec},
+   * arguments are NOT split on whitespace — each element in `args` is passed
+   * as a separate argument. No shell is involved.
+   *
+   * Returns stdout as a string. Throws {@link ExecError} on non-zero exit.
+   */
+  async execFile(file: string, args: string[] = [], options?: { cwd?: string }): Promise<string> {
+    const result: ExecResult = await this.#sprite.execFile(file, args, {
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+    })
+    return typeof result.stdout === "string" ? result.stdout : result.stdout.toString("utf-8")
+  }
+
+  /**
+   * Run a shell command on the Sprite via `bash -c`.
+   *
+   * Use this when you need shell features (variable expansion, pipes,
+   * `&&`/`||`, redirects, etc.). Returns stdout as a string.
+   */
+  async execBash(command: string, options?: { cwd?: string }): Promise<string> {
+    const result = await this.#sprite.execFile("bash", ["-c", command], {
+      ...(options?.cwd ? { cwd: options.cwd } : {}),
+    })
+    return typeof result.stdout === "string" ? result.stdout : result.stdout.toString("utf-8")
+  }
+
+  /**
+   * Run a command with explicit arguments, returning stdout on success or
+   * `null` on non-zero exit (instead of throwing).
+   */
+  async tryExecFile(file: string, args: string[] = [], options?: { cwd?: string }): Promise<string | null> {
+    try {
+      return await this.execFile(file, args, options)
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Run a command on the Sprite, returning stdout on success or `null` on
    * non-zero exit (instead of throwing).
+   *
+   * @deprecated Prefer {@link tryExecFile} — this method splits on whitespace.
    */
   async tryExec(command: string, options?: { cwd?: string }): Promise<string | null> {
     try {
@@ -75,14 +121,22 @@ export class SpriteClient {
 
   /** Check if a path exists on the Sprite. */
   async exists(remotePath: string): Promise<boolean> {
-    const result = await this.tryExec(`test -e ${shellQuote(remotePath)} && echo yes || echo no`)
-    return result?.trim() === "yes"
+    try {
+      await this.#sprite.execFile("test", ["-e", remotePath])
+      return true
+    } catch {
+      return false
+    }
   }
 
   /** Check if a path is a directory on the Sprite. */
   async isDirectory(remotePath: string): Promise<boolean> {
-    const result = await this.tryExec(`test -d ${shellQuote(remotePath)} && echo yes || echo no`)
-    return result?.trim() === "yes"
+    try {
+      await this.#sprite.execFile("test", ["-d", remotePath])
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**
@@ -131,7 +185,7 @@ export class SpriteClient {
    */
   async homeDir(): Promise<string> {
     if (this.#cachedHomeDir) return this.#cachedHomeDir
-    const result = await this.exec("echo $HOME")
+    const result = await this.exec("printenv HOME")
     this.#cachedHomeDir = result.trim()
     return this.#cachedHomeDir
   }
