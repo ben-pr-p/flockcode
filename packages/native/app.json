@@ -31,7 +31,7 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "5",
+      "5uildNumber": "6",
       "bundleIdentifier": "xyz.bprp.mobilecode",
       "appleTeamId": "UX4LJ86VY7",
       "infoPlist": {
