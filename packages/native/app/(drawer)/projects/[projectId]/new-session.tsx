@@ -5,6 +5,7 @@ import { NewSessionContent } from '../../../../components/SessionContent';
 import { useRightDrawer } from '../../../../lib/drawer-context';
 import { useSettings } from '../../../../hooks/useSettings';
 import { useLayout } from '../../../../hooks/useLayout';
+import type { BackendUrl } from '../../../../state/backends';
 
 /**
  * New session route — renders the new-session view for a project.
@@ -19,10 +20,10 @@ export default function NewSessionScreen() {
   const { isTabletLandscape } = useLayout();
 
   const handleSessionCreated = useCallback(
-    (newSessionId: string, pid: string) => {
+    (newSessionId: string, pid: string, backendUrl: BackendUrl) => {
       router.replace({
         pathname: '/projects/[projectId]/sessions/[sessionId]',
-        params: { projectId: pid, sessionId: newSessionId },
+        params: { projectId: pid, sessionId: newSessionId, backendUrl },
       });
     },
     [router],

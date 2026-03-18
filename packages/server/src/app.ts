@@ -84,6 +84,19 @@ export async function createApp(opencodeUrl: string) {
   const app = new Hono()
   app.use(logger())
 
+  // Optional bearer token auth — required when MOBILE_AGENTS_AUTH_TOKEN is set
+  // (e.g., on a publicly accessible Fly Sprite). No-op when running locally.
+  const authToken = process.env.MOBILE_AGENTS_AUTH_TOKEN
+  if (authToken) {
+    app.use('*', async (c, next) => {
+      const header = c.req.header('Authorization')
+      if (header !== `Bearer ${authToken}`) {
+        return c.json({ error: 'Unauthorized' }, 401)
+      }
+      return next()
+    })
+  }
+
   // Returns the current instance ID so clients know where to connect
   app.get("/", (c) => {
     return c.json({ instanceId, appStreamUrl: "/app" })
@@ -116,7 +129,7 @@ export async function createApp(opencodeUrl: string) {
   })
 
   app.get("/health", async (c) => {
-    return c.json({ healthy: true, opencodeUrl })
+    return c.json({ healthy: true, opencodeUrl, instanceId })
   })
 
   // -----------------------------------------------------------------------

@@ -1,21 +1,24 @@
 import { useEffect, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { commandCatalogAtom, type CommandInfo } from '../state/settings';
-import { apiClientAtom } from '../lib/api';
-import { connectionInfoAtom } from '../state/settings';
+import { backendResourcesAtom } from '../lib/backend-streams';
+import { backendConnectionsAtom, type BackendUrl } from '../state/backends';
 
 /**
- * Fetches the command catalog from the server and exposes command state.
- * The catalog is re-fetched whenever the connection status transitions to
- * 'connected', mirroring the pattern in useModels.
+ * Fetches the command catalog from a specific backend and exposes command state.
+ * The catalog is re-fetched whenever the backend transitions to 'connected'.
  */
-export function useCommands() {
-  const api = useAtomValue(apiClientAtom);
-  const connection = useAtomValue(connectionInfoAtom);
+export function useCommands(backendUrl: BackendUrl) {
+  const resources = useAtomValue(backendResourcesAtom);
+  const connections = useAtomValue(backendConnectionsAtom);
   const setCatalog = useSetAtom(commandCatalogAtom);
   const catalog = useAtomValue(commandCatalogAtom);
 
+  const api = resources[backendUrl]?.api ?? null;
+  const connectionStatus = connections[backendUrl]?.status ?? 'reconnecting';
+
   const fetchCommands = useCallback(async () => {
+    if (!api) return;
     try {
       const res = await (api.api as any).commands.$get();
       if (!res.ok) return;
@@ -53,11 +56,11 @@ export function useCommands() {
     }
   }, [api, setCatalog]);
 
-  // Fetch catalog when connected
+  // Fetch catalog when backend becomes connected
   useEffect(() => {
-    if (connection.status !== 'connected') return;
+    if (connectionStatus !== 'connected') return;
     fetchCommands();
-  }, [connection.status, fetchCommands]);
+  }, [connectionStatus, fetchCommands]);
 
   return {
     commands: catalog,

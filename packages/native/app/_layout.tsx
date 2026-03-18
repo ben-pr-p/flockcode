@@ -19,10 +19,13 @@ import { ProjectsSidebar } from '../components/ProjectsSidebar';
 import { RightDrawerContext } from '../lib/drawer-context';
 import { useSettings } from '../hooks/useSettings';
 import { useLayout } from '../hooks/useLayout';
+import { useBackendManager } from '../hooks/useBackendManager';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  useBackendManager();
+
   const [fontsLoaded] = useFonts({
     'JetBrains Mono': JetBrainsMono_400Regular,
     'JetBrainsMono-Regular': JetBrainsMono_400Regular,

@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import type { ChangedFile } from '../lib/stream-db';
+import type { BackendUrl } from '../state/backends';
 import { DiffWebView } from './DiffWebView';
 
 interface ChangesViewProps {
   sessionId: string;
+  backendUrl: BackendUrl;
   changes: ChangedFile[];
 }
 
-export function ChangesView({ sessionId, changes }: ChangesViewProps) {
+export function ChangesView({ sessionId, backendUrl, changes }: ChangesViewProps) {
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
 
   const toggleFile = (path: string) => {
@@ -68,7 +70,7 @@ export function ChangesView({ sessionId, changes }: ChangesViewProps) {
       <View
         className={isExpanded ? 'flex-1' : ''}
         style={isExpanded ? undefined : { height: 0, overflow: 'hidden' }}>
-        <DiffWebView sessionId={sessionId} activeFile={expandedChange?.path ?? null} />
+        <DiffWebView sessionId={sessionId} backendUrl={backendUrl} activeFile={expandedChange?.path ?? null} />
       </View>
 
       {expandedChange && changeAfter && (

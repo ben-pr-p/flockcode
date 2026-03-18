@@ -11,40 +11,44 @@ import { VoiceInputArea } from './VoiceInputArea';
 import { ModelSelectorSheet } from './ModelSelectorSheet';
 import { AgentCommandSheet } from './AgentCommandSheet';
 import {
-  useStateQuery,
   flattenServerMessage,
   type UIMessage as Message,
   type SessionValue,
   type ProjectValue,
   type ChangeValue,
   type ChangedFile,
+  type WorktreeStatusValue,
 } from '../lib/stream-db';
 import type { Message as ServerMessage } from '../../server/src/types';
-import { apiClientAtom } from '../lib/api';
+import type { ApiClient } from '../lib/api';
+import { backendResourcesAtom } from '../lib/backend-streams';
+import { useBackendStateQuery } from '../lib/merged-query';
+import { MergedStateQuery, type WithBackendUrl } from '../lib/merged-query';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useModels } from '../hooks/useModels';
 import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import type { ModelSelection, PendingCommand } from '../state/settings';
+import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
 
 /** Settings type shared by both wrappers. */
 export interface SessionSettings {
-  serverUrl: string;
-  setServerUrl: (url: string) => void;
   connection: ConnectionInfo;
+  backends: BackendConfig[];
+  setBackends: (backends: BackendConfig[]) => void;
+  connections: Record<BackendUrl, BackendConnection>;
   handsFreeAutoRecord: boolean;
   setHandsFreeAutoRecord: (value: boolean) => void;
   notificationSound: NotificationSound;
   setNotificationSound: (value: NotificationSound) => void;
   notificationSoundOptions: { label: string; value: NotificationSound }[];
   appVersion: string;
-  defaultModel: string;
-  onResyncConfig?: () => Promise<void>;
 }
 
 interface SessionViewProps {
   sessionId: string;
+  backendUrl: BackendUrl;
   session: SessionValue;
   serverMessages: Message[];
   changes: ChangedFile[];
@@ -59,9 +63,7 @@ interface SessionViewProps {
   /** Whether this is a new session (no session ID yet). Commands are disabled for new sessions. */
   isNewSession?: boolean;
   emptyMessage?: string;
-  /** Latest model info from the session's raw messages (for display name derivation) */
   sessionModelInfo?: { modelID?: string; providerID?: string } | null;
-  /** Optional toggle element rendered below the empty message (used by new-session for worktree option) */
   worktreeToggle?: React.ReactNode;
 }
 
@@ -73,6 +75,7 @@ interface SessionViewProps {
  */
 export function SessionView({
   sessionId,
+  backendUrl,
   session,
   serverMessages,
   changes,
@@ -101,8 +104,8 @@ export function SessionView({
   const [agentOverride, setAgentOverride] = useState<string | null>(null);
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
 
-  const { agents } = useAgents();
-  const { commands } = useCommands();
+  const { agents } = useAgents(backendUrl);
+  const { commands } = useCommands(backendUrl);
 
   // Effective agent: user override > "build"
   const effectiveAgent = agentOverride ?? 'build';
@@ -113,24 +116,22 @@ export function SessionView({
     return agent?.name ?? effectiveAgent;
   }, [agents, effectiveAgent]);
 
-  // Worktree status (merge state + uncommitted changes) from the session stream
-  const { data: worktreeStatusResults } = useStateQuery(
+  // Worktree status from this session's backend
+  const { data: worktreeStatusResults } = useBackendStateQuery<WorktreeStatusValue>(
+    backendUrl,
     (db, q) =>
       q
         .from({ worktreeStatuses: db.collections.worktreeStatuses })
         .where(({ worktreeStatuses }) => eq(worktreeStatuses.sessionId, sessionId)),
     [sessionId]
   );
+  const worktreeStatus = worktreeStatusResults?.[0];
 
-  const worktreeStatus = (
-    worktreeStatusResults as import('../lib/stream-db').WorktreeStatusValue[] | undefined
-  )?.[0];
-
-  console.log({ worktreeStatus });
-
-  const api = useAtomValue(apiClientAtom);
+  const resources = useAtomValue(backendResourcesAtom);
+  const api = resources[backendUrl]?.api;
 
   const handleMerge = useCallback(async () => {
+    if (!api) return;
     setIsMerging(true);
     try {
       const res = await (api.api.sessions[':sessionId'].merge as any).$post({
@@ -154,42 +155,33 @@ export function SessionView({
     }
   }, [api, sessionId]);
 
-  // Look up the project to derive the display name from the main worktree path
-  const { data: projectResults } = useStateQuery(
+  // Look up the project to derive the display name
+  const { data: projectResults } = useBackendStateQuery<ProjectValue>(
+    backendUrl,
     (db, q) =>
       q
         .from({ projects: db.collections.projects })
         .where(({ projects }) => eq(projects.id, session.projectID)),
     [session.projectID]
   );
-  const project = (projectResults as ProjectValue[] | undefined)?.[0];
+  const project = projectResults?.[0];
+  const worktree = project?.worktree ?? '';
+  const sessionDir = session.directory ?? '';
+  const projectDir = worktree.split('/').pop() ?? worktree;
+  const worktreeDir = sessionDir.split('/').pop() ?? sessionDir;
+  const projectName =
+    sessionDir && sessionDir !== worktree
+      ? `${projectDir} / ${worktreeDir}`
+      : projectDir;
 
-  // Derive display name: show the project's main directory name, with the
-  // worktree directory in parentheses when the session runs in a different path.
-  const projectDisplayName = useMemo(() => {
-    const projectWorktree = project?.worktree ?? '';
-    const sessionDir = session.directory ?? '';
-    const mainName = projectWorktree.split('/').pop() || projectWorktree || '';
-    if (!mainName) return sessionDir.split('/').pop() || sessionDir;
-    if (sessionDir && sessionDir !== projectWorktree) {
-      const worktreeName = sessionDir.split('/').pop() || sessionDir;
-      return `${mainName} (${worktreeName})`;
-    }
-    return mainName;
-  }, [project?.worktree, session.directory]);
+  const serverMessagesList = useMemo(() => serverMessages, [serverMessages]);
 
-  // Model selection — per-session override, not persisted globally.
-  // `null` means the user hasn't overridden the model for this session instance.
+  const { catalog, getDisplayNames, getDefaultModel } = useModels(backendUrl);
+
+  // Per-session model override — doesn't persist globally across sessions.
   const [modelOverride, setModelOverride] = useState<ModelSelection | null>(null);
 
-  const {
-    catalog,
-    getDisplayNames,
-    getDefaultModel,
-    refetchCatalog,
-  } = useModels();
-
-  // The effective model for this session: user override > session's last-used model > server default (null).
+  // Effective model: session override > session's last-used model > null (server default).
   const effectiveModel = useMemo<ModelSelection | null>(() => {
     if (modelOverride) return modelOverride;
     if (sessionModelInfo?.modelID && sessionModelInfo?.providerID) {
@@ -198,26 +190,58 @@ export function SessionView({
     return null;
   }, [modelOverride, sessionModelInfo]);
 
-  // Merge server messages with optimistic voice messages, removing optimistic
-  // ones once the server has caught up (new user message appeared)
-  const messages = useMemo(() => {
-    if (pendingVoiceMessages.length === 0) return serverMessages;
-
-    // Find the latest server user message timestamp
-    const latestServerUserMsg = serverMessages
-      .filter((m) => m.role === 'user')
-      .reduce((latest, m) => Math.max(latest, m.createdAt), 0);
-
-    // Keep only pending messages that are newer than the latest server user message
-    const stillPending = pendingVoiceMessages.filter((m) => m.createdAt > latestServerUserMsg);
-
-    // Clean up stale pending messages
-    if (stillPending.length !== pendingVoiceMessages.length) {
-      setPendingVoiceMessages(stillPending);
+  // Derive the model display name for the input area
+  const modelName = useMemo(() => {
+    if (effectiveModel) {
+      const { modelName: mn } = getDisplayNames(effectiveModel.modelID, effectiveModel.providerID);
+      return mn;
     }
+    const dm = getDefaultModel();
+    if (dm) {
+      const { modelName: mn } = getDisplayNames(dm.modelID, dm.providerID);
+      return mn;
+    }
+    return 'Default';
+  }, [effectiveModel, getDisplayNames, getDefaultModel]);
 
-    return [...serverMessages, ...stillPending];
-  }, [serverMessages, pendingVoiceMessages]);
+  const handleModelPress = useCallback(() => {
+    setModelSelectorVisible(true);
+  }, []);
+
+  // Merge optimistic voice messages with server messages
+  const allMessages = useMemo(() => {
+    const merged = [...serverMessagesList];
+    for (const vm of pendingVoiceMessages) {
+      if (!merged.some((m) => m.id === vm.id)) {
+        merged.push(vm);
+      }
+    }
+    return merged;
+  }, [serverMessagesList, pendingVoiceMessages]);
+
+  const audioRecorder = useAudioRecorder({
+    onSendAudio: (base64, mimeType) => {
+      const pendingId = `voice-${++voiceIdCounter.current}`;
+      setPendingVoiceMessages((prev) => [
+        ...prev,
+        {
+          id: pendingId,
+          sessionId,
+          role: 'user',
+          type: 'voice',
+          content: '',
+          audioUri: null,
+          transcription: null,
+          toolName: null,
+          toolMeta: null,
+          syncStatus: 'sending',
+          createdAt: Date.now(),
+          isComplete: false,
+        },
+      ]);
+      onSendAudio(base64, mimeType, effectiveModel);
+    },
+  });
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -239,68 +263,12 @@ export function SessionView({
     [onSendText, onExecuteCommand, effectiveModel, effectiveAgent, pendingCommand]
   );
 
-  const handleSendAudio = useCallback(
-    (base64: string, mimeType: string) => {
-      // Add an optimistic voice message immediately
-      const optimisticId = `voice-pending-${++voiceIdCounter.current}`;
-      const optimisticMsg: Message = {
-        id: optimisticId,
-        sessionId,
-        role: 'user',
-        type: 'voice',
-        content: 'Transcribing...',
-        audioUri: null,
-        transcription: null,
-        toolName: null,
-        toolMeta: null,
-        syncStatus: 'sending',
-        createdAt: Date.now(),
-        isComplete: true,
-      };
-      setPendingVoiceMessages((prev) => [...prev, optimisticMsg]);
-
-      onSendAudio(base64, mimeType, effectiveModel);
-    },
-    [sessionId, onSendAudio, effectiveModel]
-  );
-
-  const audioRecorder = useAudioRecorder({ onSendAudio: handleSendAudio });
-
-  // Derive model display name from the effective model for this session.
-  const modelName = useMemo(() => {
-    if (effectiveModel) {
-      return getDisplayNames(effectiveModel.modelID, effectiveModel.providerID).modelName;
-    }
-    const defaultModel = getDefaultModel();
-    if (defaultModel) {
-      return getDisplayNames(defaultModel.modelID, defaultModel.providerID).modelName;
-    }
-    return 'Default';
-  }, [effectiveModel, getDisplayNames, getDefaultModel]);
-
-  // Display string for settings screen's "Default model" row
-  const settingsDefaultModel = useMemo(() => {
-    if (effectiveModel) {
-      const { modelName: mn, providerName: pn } = getDisplayNames(
-        effectiveModel.modelID,
-        effectiveModel.providerID
-      );
-      return pn ? `${pn} / ${mn}` : mn;
-    }
-    const dm = getDefaultModel();
-    if (dm) {
-      const { modelName: mn, providerName: pn } = getDisplayNames(dm.modelID, dm.providerID);
-      return pn ? `${pn} / ${mn}` : mn;
-    }
-    return settings.defaultModel;
-  }, [effectiveModel, getDisplayNames, getDefaultModel, settings.defaultModel]);
-
-  const handleModelPress = useCallback(() => {
-    setModelSelectorVisible(true);
+  const handleCloseModelSelector = useCallback(() => {
+    setModelSelectorVisible(false);
   }, []);
 
   const handleModelSelect = useCallback(
-    (model: { providerID: string; modelID: string } | null) => {
+    (model: ModelSelection | null) => {
       setModelOverride(model);
     },
     []
@@ -318,14 +286,16 @@ export function SessionView({
     setPendingCommand(cmd);
   }, []);
 
+
   const modelSheet = (
     <ModelSelectorSheet
       visible={modelSelectorVisible}
-      onClose={() => setModelSelectorVisible(false)}
+      onClose={handleCloseModelSelector}
       catalog={catalog}
       selectedModel={effectiveModel}
       onSelectModel={handleModelSelect}
       defaultModel={getDefaultModel()}
+      backendUrl={backendUrl}
     />
   );
 
@@ -349,9 +319,10 @@ export function SessionView({
       <>
         <SplitLayout
           sessionId={sessionId}
+          backendUrl={backendUrl}
           session={session}
-          projectName={projectDisplayName}
-          messages={messages}
+          projectName={projectName}
+          messages={allMessages}
           changes={changes}
           onMenuPress={onMenuPress}
           onProjectsPress={onProjectsPress}
@@ -361,11 +332,7 @@ export function SessionView({
           onSend={handleSend}
           isSending={isSending}
           audioRecorder={audioRecorder}
-          settings={{
-            ...settings,
-            defaultModel: settingsDefaultModel,
-            onResyncConfig: refetchCatalog,
-          }}
+          settings={settings}
           onAbort={onAbort}
           modelName={modelName}
           onModelPress={handleModelPress}
@@ -387,15 +354,15 @@ export function SessionView({
     <>
       <SessionScreen
         sessionId={sessionId}
+        backendUrl={backendUrl}
         session={session}
-        projectName={projectDisplayName}
-        messages={messages}
+        projectName={projectName}
+        messages={allMessages}
         changes={changes}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onMenuPress={onMenuPress}
         onProjectsPress={onProjectsPress}
-        onToolCallPress={() => {}}
         onSend={handleSend}
         isSending={isSending}
         audioRecorder={audioRecorder}
@@ -420,6 +387,7 @@ export function SessionView({
 
 interface SessionContentProps {
   sessionId: string;
+  backendUrl: BackendUrl;
   isTabletLandscape: boolean;
   onMenuPress: () => void;
   onProjectsPress: () => void;
@@ -433,19 +401,21 @@ interface SessionContentProps {
  */
 export function SessionContent({
   sessionId,
+  backendUrl,
   isTabletLandscape,
   onMenuPress,
   onProjectsPress,
   settings,
 }: SessionContentProps) {
-  const { data: sessionResults, isLoading: sessionLoading } = useStateQuery(
+  const { data: sessionResults, isLoading: sessionLoading } = useBackendStateQuery<SessionValue>(
+    backendUrl,
     (db, q) =>
       q
         .from({ sessions: db.collections.sessions })
         .where(({ sessions }) => eq(sessions.id, sessionId)),
     [sessionId]
   );
-  const session = (sessionResults as SessionValue[] | undefined)?.[0] ?? null;
+  const session = sessionResults?.[0] ?? null;
 
   if (sessionLoading || !session) {
     return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
@@ -455,6 +425,7 @@ export function SessionContent({
     <ExistingSessionDataLoader
       session={session}
       sessionId={sessionId}
+      backendUrl={backendUrl}
       isTabletLandscape={isTabletLandscape}
       onMenuPress={onMenuPress}
       onProjectsPress={onProjectsPress}
@@ -467,6 +438,7 @@ export function SessionContent({
 function ExistingSessionDataLoader({
   session,
   sessionId,
+  backendUrl,
   isTabletLandscape,
   onMenuPress,
   onProjectsPress,
@@ -474,14 +446,17 @@ function ExistingSessionDataLoader({
 }: {
   session: SessionValue;
   sessionId: string;
+  backendUrl: BackendUrl;
   isTabletLandscape: boolean;
   onMenuPress: () => void;
   onProjectsPress: () => void;
   settings: SessionSettings;
 }) {
-  const api = useAtomValue(apiClientAtom);
+  const resources = useAtomValue(backendResourcesAtom);
+  const api = resources[backendUrl]?.api;
 
-  const { data: rawMessages } = useStateQuery(
+  const { data: rawMessages } = useBackendStateQuery<ServerMessage>(
+    backendUrl,
     (db, q) =>
       q
         .from({ messages: db.collections.messages })
@@ -490,14 +465,13 @@ function ExistingSessionDataLoader({
   );
   const sortedRawMessages = useMemo(() => {
     if (!rawMessages) return [];
-    return (rawMessages as ServerMessage[]).slice().sort((a, b) => a.createdAt - b.createdAt);
+    return rawMessages.slice().sort((a, b) => a.createdAt - b.createdAt);
   }, [rawMessages]);
 
   const serverMessages = useMemo(() => {
     return sortedRawMessages.flatMap(flattenServerMessage);
   }, [sortedRawMessages]);
 
-  // Derive the session's current model from the latest user message with model info
   const sessionModelInfo = useMemo(() => {
     for (let i = sortedRawMessages.length - 1; i >= 0; i--) {
       const m = sortedRawMessages[i];
@@ -508,7 +482,8 @@ function ExistingSessionDataLoader({
     return null;
   }, [sortedRawMessages]);
 
-  const { data: changeResults } = useStateQuery(
+  const { data: changeResults } = useBackendStateQuery<ChangeValue>(
+    backendUrl,
     (db, q) =>
       q
         .from({ changes: db.collections.changes })
@@ -516,12 +491,13 @@ function ExistingSessionDataLoader({
     [sessionId]
   );
   const changes = useMemo(() => {
-    const result = (changeResults as ChangeValue[] | undefined)?.[0];
+    const result = changeResults?.[0];
     return result?.files ?? [];
   }, [changeResults]);
 
   const handleSendText = useCallback(
     async (text: string, model: ModelSelection | null, agent?: string) => {
+      if (!api) return;
       const res = await api.api.sessions[':sessionId'].prompt.$post({
         param: { sessionId },
         json: {
@@ -537,6 +513,7 @@ function ExistingSessionDataLoader({
 
   const handleSendAudio = useCallback(
     (base64: string, mimeType: string, model: ModelSelection | null) => {
+      if (!api) return;
       api.api.sessions[':sessionId'].prompt
         .$post({
           param: { sessionId },
@@ -568,6 +545,7 @@ function ExistingSessionDataLoader({
   );
 
   const handleAbort = useCallback(async () => {
+    if (!api) return;
     try {
       const res = await (api.api.sessions[':sessionId'].abort as any).$post({
         param: { sessionId },
@@ -581,6 +559,7 @@ function ExistingSessionDataLoader({
   return (
     <SessionView
       sessionId={sessionId}
+      backendUrl={backendUrl}
       session={session}
       serverMessages={serverMessages}
       changes={changes}
@@ -602,15 +581,14 @@ interface NewSessionContentProps {
   isTabletLandscape: boolean;
   onMenuPress: () => void;
   onProjectsPress: () => void;
-  onSessionCreated: (sessionId: string, projectId: string) => void;
+  onSessionCreated: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
   settings: SessionSettings;
 }
 
 /**
  * New-session wrapper.
- * Provides a placeholder session and wires send callbacks that create the
- * session on the server (via the atomic createSessionWithPrompt RPC) before
- * navigating to the real session.
+ * Uses MergedStateQuery to find which backends have this project, picks the
+ * first one, and wires send callbacks that create the session on that backend.
  */
 export function NewSessionContent({
   projectId,
@@ -620,22 +598,60 @@ export function NewSessionContent({
   onSessionCreated,
   settings,
 }: NewSessionContentProps) {
-  const api = useAtomValue(apiClientAtom);
-  // Guard against multiple simultaneous session creations
-  const creatingRef = useRef(false);
-  // Whether to create a git worktree for this session (for parallel work)
-  const [useWorktree, setUseWorktree] = useState(false);
-
-  // Look up the project to get worktree for display name
-  const { data: projectResults } = useStateQuery(
-    (db, q) =>
-      q
-        .from({ projects: db.collections.projects })
-        .where(({ projects }) => eq(projects.id, projectId)),
-    [projectId]
+  return (
+    <MergedStateQuery<ProjectValue>
+      query={(db, q) =>
+        q
+          .from({ projects: db.collections.projects })
+          .where(({ projects }) => eq(projects.id, projectId))
+      }
+      deps={[projectId]}
+    >
+      {({ data: projectResults, isLoading }) => {
+        const taggedProject = projectResults?.[0];
+        if (isLoading || !taggedProject) {
+          return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
+        }
+        return (
+          <NewSessionDataLoader
+            projectId={projectId}
+            backendUrl={taggedProject.backendUrl}
+            worktree={taggedProject.worktree}
+            isTabletLandscape={isTabletLandscape}
+            onMenuPress={onMenuPress}
+            onProjectsPress={onProjectsPress}
+            onSessionCreated={onSessionCreated}
+            settings={settings}
+          />
+        );
+      }}
+    </MergedStateQuery>
   );
-  const project = (projectResults as import('../lib/stream-db').ProjectValue[] | undefined)?.[0];
-  const worktree = project?.worktree ?? '';
+}
+
+function NewSessionDataLoader({
+  projectId,
+  backendUrl,
+  worktree,
+  isTabletLandscape,
+  onMenuPress,
+  onProjectsPress,
+  onSessionCreated,
+  settings,
+}: {
+  projectId: string;
+  backendUrl: BackendUrl;
+  worktree: string;
+  isTabletLandscape: boolean;
+  onMenuPress: () => void;
+  onProjectsPress: () => void;
+  onSessionCreated: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
+  settings: SessionSettings;
+}) {
+  const resources = useAtomValue(backendResourcesAtom);
+  const api = resources[backendUrl]?.api;
+  const creatingRef = useRef(false);
+  const [useWorktree, setUseWorktree] = useState(false);
 
   const now = Date.now();
   const placeholderSession: SessionValue = {
@@ -656,7 +672,7 @@ export function NewSessionContent({
       )[],
       model: ModelSelection | null
     ) => {
-      if (creatingRef.current) return;
+      if (creatingRef.current || !api) return;
       creatingRef.current = true;
 
       try {
@@ -670,14 +686,14 @@ export function NewSessionContent({
         });
         if (!res.ok) throw new Error('Create session failed');
         const data = (await res.json()) as { sessionId: string };
-        onSessionCreated(data.sessionId, projectId);
+        onSessionCreated(data.sessionId, projectId, backendUrl);
       } catch (err) {
         console.error('[NewSessionContent] createSessionWithPrompt failed:', err);
       } finally {
         creatingRef.current = false;
       }
     },
-    [api, projectId, onSessionCreated, useWorktree]
+    [api, projectId, backendUrl, onSessionCreated, useWorktree]
   );
 
   const handleSendText = useCallback(
@@ -699,6 +715,7 @@ export function NewSessionContent({
   return (
     <SessionView
       sessionId="new"
+      backendUrl={backendUrl}
       session={placeholderSession}
       serverMessages={[]}
       changes={[]}
@@ -768,4 +785,16 @@ function SessionLoading({
       />
     </View>
   );
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
 }

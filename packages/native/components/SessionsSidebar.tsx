@@ -9,10 +9,13 @@ import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useStateQuery, useAppStateQuery, type SessionValue, type SessionMetaValue, type WorktreeStatusValue, type ProjectValue } from '../lib/stream-db';
+import type { SessionValue, SessionMetaValue, WorktreeStatusValue, ProjectValue } from '../lib/stream-db';
 import type { Message as ServerMessage } from '../../server/src/types';
+import { MergedStateQuery, MergedAppStateQuery, type WithBackendUrl } from '../lib/merged-query';
+import { backendResourcesAtom } from '../lib/backend-streams';
 import { pinnedSessionIdsAtom, pinnedProjectIdsAtom } from '../state/ui';
-import { apiClientAtom } from '../lib/api';
+import type { BackendUrl } from '../state/backends';
+import type { ApiClient } from '../lib/api';
 
 interface SessionsSidebarProps {
   projectId: string | undefined;
@@ -49,10 +52,10 @@ export function SessionsSidebar({
   }, [projectId, router, closeDrawer]);
 
   const handleSelectSession = useCallback(
-    (sessionId: string, pid: string) => {
+    (sessionId: string, pid: string, backendUrl: BackendUrl) => {
       router.push({
         pathname: '/projects/[projectId]/sessions/[sessionId]',
-        params: { projectId: pid, sessionId },
+        params: { projectId: pid, sessionId, backendUrl },
       });
       closeDrawer();
     },
@@ -91,12 +94,47 @@ export function SessionsSidebar({
       <View className="h-px bg-stone-200 dark:bg-stone-800" />
 
       {projectId ? (
-        <SessionListContent
-          projectId={projectId}
-          selectedSessionId={selectedSessionId}
-          onSelectSession={handleSelectSession}
-          onNewSession={handleNewSession}
-        />
+        <MergedStateQuery<SessionValue>
+          query={(db, q) => q.from({ sessions: db.collections.sessions })}
+        >
+          {({ data: allSessions }) => (
+            <MergedStateQuery<WorktreeStatusValue>
+              query={(db, q) => q.from({ worktreeStatuses: db.collections.worktreeStatuses })}
+            >
+              {({ data: worktreeStatuses }) => (
+                <MergedStateQuery<ServerMessage>
+                  query={(db, q) => q.from({ messages: db.collections.messages })}
+                >
+                  {({ data: allMessages }) => (
+                    <MergedStateQuery<ProjectValue>
+                      query={(db, q) => q.from({ projects: db.collections.projects })}
+                    >
+                      {({ data: allProjects }) => (
+                        <MergedAppStateQuery<SessionMetaValue>
+                          query={(db, q) => q.from({ sessionMeta: db.collections.sessionMeta })}
+                        >
+                          {({ data: sessionMetas }) => (
+                            <SessionListContent
+                              projectId={projectId}
+                              selectedSessionId={selectedSessionId}
+                              onSelectSession={handleSelectSession}
+                              onNewSession={handleNewSession}
+                              allSessions={allSessions}
+                              worktreeStatuses={worktreeStatuses}
+                              allMessages={allMessages}
+                              allProjects={allProjects}
+                              sessionMetas={sessionMetas}
+                            />
+                          )}
+                        </MergedAppStateQuery>
+                      )}
+                    </MergedStateQuery>
+                  )}
+                </MergedStateQuery>
+              )}
+            </MergedStateQuery>
+          )}
+        </MergedStateQuery>
       ) : (
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-center text-sm font-medium text-stone-700 dark:text-stone-400">
@@ -208,18 +246,20 @@ function SessionWorktreeBadge({ worktreeStatus }: { worktreeStatus: WorktreeStat
   return null;
 }
 
+type TaggedSession = WithBackendUrl<SessionValue>;
+
 interface SessionRowProps {
-  session: SessionValue;
+  session: TaggedSession;
   isSelected: boolean;
   isPinned: boolean;
   sessionStatus: SessionValue['status'];
   worktreeStatus?: WorktreeStatusValue;
   /** Agent name used for this session (e.g. "build", "plan"). */
   agentName?: string;
-  onPress: (sessionId: string, projectId: string) => void;
-  onOverflow?: (id: string) => void;
+  onPress: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
+  onOverflow?: (id: string, backendUrl: BackendUrl) => void;
   onTogglePin: (id: string) => void;
-  onArchive?: (id: string) => void;
+  onArchive?: (id: string, backendUrl: BackendUrl) => void;
   isArchived?: boolean;
   hasChildren?: boolean;
   isExpanded?: boolean;
@@ -242,7 +282,7 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
   const renderRightActions = useCallback(() => (
     <Pressable
       onPress={() => {
-        onArchive?.(session.id);
+        onArchive?.(session.id, session.backendUrl);
         swipeableRef.current?.close();
       }}
       className="items-center justify-center rounded-lg bg-amber-600 px-4">
@@ -256,7 +296,7 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
         {isArchived ? 'Unarchive' : 'Archive'}
       </Text>
     </Pressable>
-  ), [session.id, isArchived, onArchive]);
+  ), [session.id, session.backendUrl, isArchived, onArchive]);
 
   return (
     <Swipeable
@@ -264,7 +304,7 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
       renderRightActions={onArchive ? renderRightActions : undefined}
       overshootRight={false}>
       <Pressable
-        onPress={() => onPress(session.id, session.projectID)}
+        onPress={() => onPress(session.id, session.projectID, session.backendUrl)}
         onLongPress={handleLongPress}
         className={`flex-row items-center gap-3 rounded-lg py-3 ${
           isSubSession ? 'pl-8 pr-3.5' : 'px-3.5'
@@ -312,7 +352,7 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
           </View>
         </View>
         {onOverflow && (
-          <Pressable onPress={() => onOverflow(session.id)} hitSlop={8}>
+          <Pressable onPress={() => onOverflow(session.id, session.backendUrl)} hitSlop={8}>
             <Ellipsis size={16} color={overflowColor} />
           </Pressable>
         )}
@@ -322,8 +362,8 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
 }
 
 type SessionTree = {
-  session: SessionValue;
-  children: SessionValue[];
+  session: TaggedSession;
+  children: TaggedSession[];
 };
 
 function SessionListContent({
@@ -331,12 +371,22 @@ function SessionListContent({
   selectedSessionId,
   onSelectSession,
   onNewSession,
+  allSessions,
+  worktreeStatuses,
+  allMessages,
+  allProjects,
+  sessionMetas,
 }: {
   projectId: string;
   selectedSessionId: string | null;
-  onSelectSession: (sessionId: string, projectId: string) => void;
+  onSelectSession: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
   /** Create a new session for the given project ID. */
   onNewSession: (projectId: string) => void;
+  allSessions: TaggedSession[] | null;
+  worktreeStatuses: WithBackendUrl<WorktreeStatusValue>[] | null;
+  allMessages: WithBackendUrl<ServerMessage>[] | null;
+  allProjects: WithBackendUrl<ProjectValue>[] | null;
+  sessionMetas: WithBackendUrl<SessionMetaValue>[] | null;
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
@@ -352,7 +402,12 @@ function SessionListContent({
   const resolvedPinnedProjectIds = pinnedProjectIds instanceof Promise ? [] : pinnedProjectIds;
   const pinnedProjectSet = useMemo(() => new Set(resolvedPinnedProjectIds), [resolvedPinnedProjectIds]);
 
-  const api = useAtomValue(apiClientAtom);
+  const resources = useAtomValue(backendResourcesAtom);
+  const getApi = useCallback((backendUrl: BackendUrl): ApiClient | null => {
+    return resources[backendUrl]?.api ?? null;
+  }, [resources]);
+
+
   const router = useRouter();
   const params = useLocalSearchParams<{ projectId?: string; sessionId?: string }>();
 
@@ -368,7 +423,9 @@ function SessionListContent({
   );
 
   const deleteSession = useCallback(
-    async (sid: string) => {
+    async (sid: string, backendUrl: BackendUrl) => {
+      const api = getApi(backendUrl);
+      if (!api) return;
       try {
         const res = await api.api.sessions[':sessionId'].$delete({
           param: { sessionId: sid },
@@ -377,7 +434,6 @@ function SessionListContent({
           Alert.alert('Error', 'Failed to delete session.');
           return;
         }
-        // If we just deleted the active session, navigate away
         if (sid === params.sessionId && params.projectId) {
           router.push({
             pathname: '/projects/[projectId]/new-session',
@@ -388,11 +444,11 @@ function SessionListContent({
         Alert.alert('Error', 'Failed to delete session.');
       }
     },
-    [api, params.sessionId, params.projectId, router],
+    [getApi, params.sessionId, params.projectId, router],
   );
 
   const handleOverflow = useCallback(
-    (sid: string) => {
+    (sid: string, backendUrl: BackendUrl) => {
       const isPinned = resolvedPinnedIds.includes(sid);
       Alert.alert(
         'Session Options',
@@ -420,7 +476,7 @@ function SessionListContent({
                   {
                     text: 'Delete',
                     style: 'destructive',
-                    onPress: () => deleteSession(sid),
+                    onPress: () => deleteSession(sid, backendUrl),
                   },
                 ],
               );
@@ -433,74 +489,53 @@ function SessionListContent({
     [resolvedPinnedIds, setPinnedIds, deleteSession],
   );
 
-  const archiveSession = useCallback(async (sessionId: string) => {
+  const archiveSession = useCallback(async (sessionId: string, backendUrl: BackendUrl) => {
+    const api = getApi(backendUrl);
+    if (!api) return;
     await api.api.sessions[':sessionId'].archive.$post({
       param: { sessionId },
     });
-  }, [api]);
+  }, [getApi]);
 
-  const unarchiveSession = useCallback(async (sessionId: string) => {
+  const unarchiveSession = useCallback(async (sessionId: string, backendUrl: BackendUrl) => {
+    const api = getApi(backendUrl);
+    if (!api) return;
     await api.api.sessions[':sessionId'].unarchive.$post({
       param: { sessionId },
     });
-  }, [api]);
+  }, [getApi]);
 
-  const { data: allSessions } = useStateQuery(
-    (db, q) => q.from({ sessions: db.collections.sessions }),
-  );
-
-  const { data: worktreeStatusResults } = useStateQuery(
-    (db, q) => q.from({ worktreeStatuses: db.collections.worktreeStatuses }),
-  );
   const worktreeStatusBySession = useMemo(() => {
     const map = new Map<string, WorktreeStatusValue>();
-    for (const ws of (worktreeStatusResults as WorktreeStatusValue[] | undefined) ?? []) {
+    for (const ws of worktreeStatuses ?? []) {
       map.set(ws.sessionId, ws);
     }
     return map;
-  }, [worktreeStatusResults]);
+  }, [worktreeStatuses]);
 
-  // Query all messages to derive the agent used for each session.
-  // We look at the most recent user message per session to find the agent.
-  const { data: allMessages } = useStateQuery(
-    (db, q) => q.from({ messages: db.collections.messages }),
-  );
   const agentBySession = useMemo(() => {
     const map = new Map<string, string>();
-    if (!allMessages) return map;
-    const msgs = allMessages as ServerMessage[];
-    // Walk through messages and track the latest user message agent per session
-    for (const m of msgs) {
-      if (m.role === 'user' && m.agent) {
-        const existing = map.get(m.sessionId);
-        if (!existing) {
-          map.set(m.sessionId, m.agent);
+    for (const m of allMessages ?? []) {
+      if (m.role === 'user' && (m as any).agent) {
+        if (!map.has(m.sessionId)) {
+          map.set(m.sessionId, (m as any).agent);
         }
-        // Always update to the latest (messages may not be sorted, but
-        // we just want any agent — the most common case is all messages
-        // in a session use the same agent)
       }
     }
     return map;
   }, [allMessages]);
 
-  // Query archived session IDs from persistent app state stream
-  const { data: sessionMetas } = useAppStateQuery(
-    (db, q) => q.from({ sessionMeta: db.collections.sessionMeta }),
-  );
+
   const archivedIds = useMemo(
     () => new Set(
-      (sessionMetas as SessionMetaValue[] | undefined)
+      sessionMetas
         ?.filter(m => m.archived)
         .map(m => m.sessionId) ?? []
     ),
     [sessionMetas],
   );
 
-  // Query all projects so we can show project names for pinned-project sessions
-  const { data: allProjects } = useStateQuery(
-    (db, q) => q.from({ projects: db.collections.projects }),
-  );
+  // Build project name map for pinned-project session group headers
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of (allProjects as ProjectValue[] | undefined) ?? []) {
@@ -564,7 +599,7 @@ function SessionListContent({
 
   // Build tree structure: top-level sessions with nested children
   const { activeTree, archivedTree } = useMemo(() => {
-    const byProject = (allSessions as SessionValue[] | undefined)?.filter(
+    const byProject = allSessions?.filter(
       (s) => s.projectID === projectId,
     );
     if (!byProject) return { activeTree: [], archivedTree: [] };
@@ -575,8 +610,7 @@ function SessionListContent({
 
     // When searching, show flat list so results aren't hidden inside collapsed parents
     if (searchQuery) {
-      const flat = filtered.map((s) => ({ session: s, children: [] as SessionValue[] }));
-      // Pinned sessions still sort to top in search results
+      const flat = filtered.map((s) => ({ session: s, children: [] as TaggedSession[] }));
       flat.sort((a, b) => {
         const aPinned = pinnedSet.has(a.session.id);
         const bPinned = pinnedSet.has(b.session.id);
@@ -590,7 +624,7 @@ function SessionListContent({
     }
 
     // Build parent->children map
-    const childrenByParent = new Map<string, SessionValue[]>();
+    const childrenByParent = new Map<string, TaggedSession[]>();
     const childIds = new Set<string>();
 
     for (const s of filtered) {
@@ -602,12 +636,10 @@ function SessionListContent({
       }
     }
 
-    // Sort children by updated time (newest first)
     for (const children of childrenByParent.values()) {
       children.sort((a, b) => b.time.updated - a.time.updated);
     }
 
-    // Build tree: only top-level sessions (not children) appear at root
     const tree: SessionTree[] = [];
     for (const s of filtered) {
       if (childIds.has(s.id)) continue;
@@ -617,7 +649,6 @@ function SessionListContent({
       });
     }
 
-    // Sort: pinned sessions first, then by updated time (newest first)
     tree.sort((a, b) => {
       const aPinned = pinnedSet.has(a.session.id);
       const bPinned = pinnedSet.has(b.session.id);
@@ -626,7 +657,6 @@ function SessionListContent({
       return b.session.time.updated - a.session.time.updated;
     });
 
-    // Split into active and archived
     const active = tree.filter(node => !archivedIds.has(node.session.id));
     const archived = tree.filter(node => archivedIds.has(node.session.id));
 

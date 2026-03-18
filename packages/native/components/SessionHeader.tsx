@@ -1,9 +1,10 @@
 import React from 'react'
 import { View, Text, Pressable, ActivityIndicator } from 'react-native'
-import { Menu, FolderOpen, GitMerge, Check, CircleDot } from 'lucide-react-native'
+import { Menu, FolderOpen, GitMerge, Check, CircleDot, Monitor, Cloud } from 'lucide-react-native'
 import { useColorScheme } from 'nativewind'
 import { useAtomValue } from 'jotai'
 import { connectionInfoAtom } from '../state/settings'
+import { backendsAtom, backendConnectionsAtom } from '../state/backends'
 import type { WorktreeStatusValue } from '../lib/stream-db'
 
 interface SessionHeaderProps {
@@ -34,7 +35,11 @@ export function SessionHeader({
   const { colorScheme } = useColorScheme()
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C'
   const connection = useAtomValue(connectionInfoAtom)
+  const connections = useAtomValue(backendConnectionsAtom)
+  const backends = useAtomValue(backendsAtom)
+  const resolvedBackends = backends instanceof Promise ? [] : backends
   const dotColor = connection.status === 'connected' ? 'bg-green-500' : 'bg-red-500'
+  const hasMultipleBackends = resolvedBackends.filter(b => b.enabled).length > 1
 
   const isWorktree = worktreeStatus?.isWorktreeSession && !worktreeStatus.error
 
@@ -59,6 +64,25 @@ export function SessionHeader({
           >
             {projectName}
           </Text>
+          {hasMultipleBackends && (
+            <View className="flex-row items-center gap-1">
+              {resolvedBackends.filter(b => b.enabled).map((b) => {
+                const conn = connections[b.url]
+                const isConnected = conn?.status === 'connected'
+                const Icon = b.type === 'local' ? Monitor : Cloud
+                return (
+                  <Icon
+                    key={b.url}
+                    size={12}
+                    color={isConnected
+                      ? (colorScheme === 'dark' ? '#A8A29E' : '#44403C')
+                      : (colorScheme === 'dark' ? '#44403C' : '#D6D3D1')
+                    }
+                  />
+                )
+              })}
+            </View>
+          )}
         </View>
 
         <Pressable

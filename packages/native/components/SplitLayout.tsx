@@ -19,16 +19,16 @@ import { VoiceInputArea } from './VoiceInputArea';
 import { SettingsScreen } from './SettingsScreen';
 import { getToolRenderers, type ToolCallProps } from './tool-calls';
 import { StatusDot, TOOL_LABELS, formatDuration } from './tool-calls/shared';
-import type { SessionValue, UIMessage as Message } from '../lib/stream-db';
-import type { ChangedFile } from '../lib/stream-db';
+import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue } from '../lib/stream-db';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import type { LeftPanelContent } from '../state/ui';
 import type { RecordingState } from '../hooks/useAudioRecorder';
-import type { WorktreeStatusValue } from '../lib/stream-db';
 import type { PendingCommand } from '../state/settings';
+import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
 
 interface SplitLayoutProps {
   sessionId: string;
+  backendUrl: BackendUrl;
   session: SessionValue;
   /** Pre-computed display name showing project dir (and worktree dir if different) */
   projectName: string;
@@ -47,17 +47,16 @@ interface SplitLayoutProps {
   };
   onAbort?: () => void;
   settings: {
-    serverUrl: string;
-    setServerUrl: (url: string) => void;
     connection: ConnectionInfo;
+    backends: BackendConfig[];
+    setBackends: (backends: BackendConfig[]) => void;
+    connections: Record<BackendUrl, BackendConnection>;
     handsFreeAutoRecord: boolean;
     setHandsFreeAutoRecord: (value: boolean) => void;
     notificationSound: NotificationSound;
     setNotificationSound: (value: NotificationSound) => void;
     notificationSoundOptions: { label: string; value: NotificationSound }[];
     appVersion: string;
-    defaultModel: string;
-    onResyncConfig?: () => Promise<void>;
   };
   modelName: string;
   onModelPress?: () => void;
@@ -79,6 +78,7 @@ interface SplitLayoutProps {
 
 export function SplitLayout({
   sessionId,
+  backendUrl,
   session,
   projectName,
   messages,
@@ -207,7 +207,7 @@ export function SplitLayout({
               onClose={handleCloseLeftPanel}
             />
           ) : (
-            <ChangesView sessionId={sessionId} changes={changes} />
+             <ChangesView sessionId={sessionId} backendUrl={backendUrl} changes={changes} />
           )}
         </View>
 
@@ -271,8 +271,9 @@ export function SplitLayout({
               elevation: 16,
             }}>
             <SettingsScreen
-              serverUrl={settings.serverUrl}
-              onServerUrlChange={settings.setServerUrl}
+              backends={settings.backends}
+              onBackendsChange={settings.setBackends}
+              connections={settings.connections}
               connection={settings.connection}
               handsFreeAutoRecord={settings.handsFreeAutoRecord}
               onHandsFreeAutoRecordChange={settings.setHandsFreeAutoRecord}
@@ -280,9 +281,6 @@ export function SplitLayout({
               onNotificationSoundChange={settings.setNotificationSound}
               notificationSoundOptions={settings.notificationSoundOptions}
               appVersion={settings.appVersion}
-              defaultModel={settings.defaultModel}
-              onDefaultModelPress={onModelPress}
-              onResyncConfig={settings.onResyncConfig}
               onBack={handleCloseSettings}
             />
           </View>

@@ -4,12 +4,14 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview'
 import { useAtomValue } from 'jotai'
 import { eq } from '@tanstack/react-db'
 import { useColorScheme } from 'nativewind'
-import { debouncedServerUrlAtom } from '../state/settings'
-import { apiClientAtom } from '../lib/api'
-import { useStateQuery, type ChangeValue } from '../lib/stream-db'
+import type { BackendUrl } from '../state/backends'
+import { backendResourcesAtom } from '../lib/backend-streams'
+import { useBackendStateQuery } from '../lib/merged-query'
+import type { ChangeValue } from '../lib/stream-db'
 
 interface DiffWebViewProps {
   sessionId: string
+  backendUrl: BackendUrl
   /** File to display, or null to hide the diff content */
   activeFile: string | null
 }
@@ -19,9 +21,11 @@ interface DiffWebViewProps {
  * Diff data is fetched by the native wrapper and sent via postMessage.
  * Switch between files by changing `activeFile` — no additional network request needed.
  */
-export function DiffWebView({ sessionId, activeFile }: DiffWebViewProps) {
-  const serverUrl = useAtomValue(debouncedServerUrlAtom)
-  const api = useAtomValue(apiClientAtom)
+export function DiffWebView({ sessionId, backendUrl, activeFile }: DiffWebViewProps) {
+  const resources = useAtomValue(backendResourcesAtom)
+  const backendRes = resources[backendUrl]
+  const api = backendRes?.api
+  const serverUrl = backendUrl.replace(/\/$/, '')
   const { colorScheme } = useColorScheme()
   const webViewRef = useRef<WebView>(null)
   const [isLoaded, setIsLoaded] = useState(false)
@@ -29,17 +33,18 @@ export function DiffWebView({ sessionId, activeFile }: DiffWebViewProps) {
   const lastFetchedSessionRef = useRef<string | null>(null)
 
   // Static shell — no session param
-  const uri = `${serverUrl.replace(/\/$/, '')}/diff`
+  const uri = `${serverUrl}/diff`
 
   // Watch changes from the stream to know when to refetch diffs
-  const { data: changeResults } = useStateQuery(
+  const { data: changeResults } = useBackendStateQuery<ChangeValue>(
+    backendUrl,
     (db, q) =>
       q
         .from({ changes: db.collections.changes })
         .where(({ changes }) => eq(changes.sessionId, sessionId)),
     [sessionId]
   )
-  const changeValue = (changeResults as ChangeValue[] | undefined)?.[0]
+  const changeValue = changeResults?.[0]
 
   const sendMessage = useCallback((msg: Record<string, unknown>) => {
     const js = `window.postMessage(${JSON.stringify(JSON.stringify(msg))}); true;`
@@ -48,9 +53,8 @@ export function DiffWebView({ sessionId, activeFile }: DiffWebViewProps) {
 
   // Fetch full diff content and send to WebView whenever changes update
   useEffect(() => {
-    if (!isLoaded || !sessionId || sessionId === 'new') return
+    if (!isLoaded || !sessionId || sessionId === 'new' || !api) return
 
-    // Build a cache key from the files summary so any change triggers a refetch
     const filesKey = changeValue?.files
       ?.map((f) => `${f.path}:${f.status}:${f.added}:${f.removed}`)
       .join(',') ?? ''
@@ -78,7 +82,6 @@ export function DiffWebView({ sessionId, activeFile }: DiffWebViewProps) {
   // When activeFile changes, tell the WebView to show it
   useEffect(() => {
     if (!isLoaded) {
-      // WebView not ready yet — store for when it loads
       pendingFileRef.current = activeFile
       return
     }
@@ -94,7 +97,6 @@ export function DiffWebView({ sessionId, activeFile }: DiffWebViewProps) {
       const data = JSON.parse(event.nativeEvent.data)
       if (data.type === 'ready' || data.type === 'loaded') {
         setIsLoaded(true)
-        // If a file was requested before loading finished, show it now
         if (pendingFileRef.current) {
           const js = `window.postMessage(${JSON.stringify(JSON.stringify({ type: 'showFile', file: pendingFileRef.current }))}); true;`
           webViewRef.current?.injectJavaScript(js)

@@ -2,13 +2,11 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useAtomValue } from 'jotai';
-import { useNavigation, DrawerActions } from '@react-navigation/native';
+import { useNavigation, DrawerActions, type NavigationProp } from '@react-navigation/native';
 import { SessionHeader } from '../../components/SessionHeader';
 import { useRightDrawer } from '../../lib/drawer-context';
-import { useStateQuery, type ProjectValue } from '../../lib/stream-db';
-import { apiClientAtom } from '../../lib/api';
-import { useArchivedSessionIds } from '../../hooks/useArchivedSessionIds';
+import { MergedStateQuery } from '../../lib/merged-query';
+import type { ProjectValue } from '../../lib/stream-db';
 
 /**
  * Root index route — shown when no project is selected.
@@ -17,24 +15,53 @@ import { useArchivedSessionIds } from '../../hooks/useArchivedSessionIds';
 export default function IndexScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<any>>();
   const { openRightDrawer } = useRightDrawer();
-  const api = useAtomValue(apiClientAtom);
 
-  const { data: rawProjects } = useStateQuery(
-    (db, q) => q.from({ projects: db.collections.projects }),
+  return (
+    <MergedStateQuery<ProjectValue>
+      query={(db, q) => q.from({ projects: db.collections.projects })}
+    >
+      {({ data: rawProjects, isLoading }) => (
+        <IndexContent
+          rawProjects={rawProjects}
+          isLoading={isLoading}
+          insets={insets}
+          router={router}
+          navigation={navigation}
+          openRightDrawer={openRightDrawer}
+        />
+      )}
+    </MergedStateQuery>
   );
+}
+
+function IndexContent({
+  rawProjects,
+  isLoading,
+  insets,
+  router,
+  navigation,
+  openRightDrawer,
+}: {
+  rawProjects: ProjectValue[] | null;
+  isLoading: boolean;
+  insets: { top: number };
+  router: ReturnType<typeof useRouter>;
+  navigation: NavigationProp<any>;
+  openRightDrawer: () => void;
+}) {
   const projects = useMemo(
     () =>
-      (rawProjects as ProjectValue[] | undefined)
+      rawProjects
         ?.slice()
         .sort((a, b) => b.time.created - a.time.created) ?? [],
     [rawProjects],
   );
 
-  const archivedIds = useArchivedSessionIds();
-
-  // Auto-navigate to the most recent project on initial load
+  // Auto-navigate to the most recent project on initial load.
+  // We navigate to the new-session screen and let the session sidebar
+  // show existing sessions. No need to fetch sessions via API here.
   const hasAutoNavigated = useRef(false);
   useEffect(() => {
     if (hasAutoNavigated.current) return;
@@ -42,31 +69,11 @@ export default function IndexScreen() {
     hasAutoNavigated.current = true;
 
     const pid = projects[0].id;
-    // Try to find existing sessions for this project
-    (async () => {
-      try {
-        const res = await api.api.projects[':projectId'].sessions.$get({
-          param: { projectId: pid },
-        });
-        if (res.ok) {
-          const sessions = (await res.json()) as any[];
-          // Skip child sessions and archived sessions — only navigate to top-level active sessions
-          const topLevel = sessions.filter((s: any) => !s.parentID && !archivedIds.has(s.id));
-          if (topLevel.length > 0) {
-            router.replace({
-              pathname: '/projects/[projectId]/sessions/[sessionId]',
-              params: { projectId: pid, sessionId: topLevel[0].id },
-            });
-            return;
-          }
-        }
-      } catch {}
-      router.replace({
-        pathname: '/projects/[projectId]/new-session',
-        params: { projectId: pid },
-      });
-    })();
-  }, [projects, api, router, archivedIds]);
+    router.replace({
+      pathname: '/projects/[projectId]/new-session',
+      params: { projectId: pid },
+    });
+  }, [projects, router]);
 
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>

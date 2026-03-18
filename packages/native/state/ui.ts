@@ -2,7 +2,7 @@ import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
 import { asyncStorageAdapter } from '../lib/jotai-async-storage'
 
-/** Pinned sessions persisted across app restarts. */
+/** Pinned sessions persisted across app restarts. Keyed by session ID. */
 export const pinnedSessionIdsAtom = atomWithStorage<string[]>(
   'sessions:pinned',
   [],

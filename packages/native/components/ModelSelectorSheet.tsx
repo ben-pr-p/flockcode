@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { Check, Search } from 'lucide-react-native';
 import type { CatalogModel, ModelSelection } from '../state/settings';
-import { useStateQuery } from '../lib/stream-db';
+import { useBackendStateQuery } from '../lib/merged-query';
+import type { BackendUrl } from '../state/backends';
 import type { Message as ServerMessage } from '../../server/src/types';
 
 /** A recently-used model entry with the timestamp of its last use. */
@@ -31,6 +32,7 @@ interface ModelSelectorSheetProps {
   selectedModel: ModelSelection | null;
   onSelectModel: (model: ModelSelection | null) => void;
   defaultModel: ModelSelection | null;
+  backendUrl: BackendUrl;
 }
 
 export function ModelSelectorSheet({
@@ -40,6 +42,7 @@ export function ModelSelectorSheet({
   selectedModel,
   onSelectModel,
   defaultModel,
+  backendUrl,
 }: ModelSelectorSheetProps) {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -49,7 +52,8 @@ export function ModelSelectorSheet({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Derive recently used models from all messages — only queries when the sheet is visible
-  const { data: allRawMessages } = useStateQuery(
+  const { data: allRawMessages } = useBackendStateQuery<ServerMessage>(
+    backendUrl,
     (db, q) => (visible ? q.from({ messages: db.collections.messages }) : null),
     [visible]
   );

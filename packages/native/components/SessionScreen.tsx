@@ -7,14 +7,14 @@ import { TabBar } from './TabBar'
 import { ChatThread } from './ChatThread'
 import { ChangesView } from './ChangesView'
 import { VoiceInputArea } from './VoiceInputArea'
-import type { SessionValue, UIMessage as Message } from '../lib/stream-db'
-import type { ChangedFile } from '../lib/stream-db'
+import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue } from '../lib/stream-db'
 import type { RecordingState } from '../hooks/useAudioRecorder'
-import type { WorktreeStatusValue } from '../lib/stream-db'
 import type { PendingCommand } from '../state/settings'
+import type { BackendUrl } from '../state/backends'
 
 interface SessionScreenProps {
   sessionId: string
+  backendUrl: BackendUrl
   session: SessionValue
   /** Pre-computed display name showing project dir (and worktree dir if different) */
   projectName: string
@@ -57,6 +57,7 @@ interface SessionScreenProps {
 
 export function SessionScreen({
   sessionId,
+  backendUrl,
   session,
   projectName,
   messages,
@@ -123,7 +124,7 @@ export function SessionScreen({
       ) : activeTab === 'session' ? (
         <ChatThread messages={messages} onToolCallPress={onToolCallPress} />
       ) : (
-        <ChangesView sessionId={sessionId} changes={changes} />
+         <ChangesView sessionId={sessionId} backendUrl={backendUrl} changes={changes} />
       )}
 
       {!session.parentID && (

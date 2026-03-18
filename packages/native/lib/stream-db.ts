@@ -1,4 +1,8 @@
-export { useStateQuery, useAppStateQuery, flattenServerMessage };
+export {
+  flattenServerMessage,
+  stateSchema,
+  appStateSchema,
+};
 export type {
   ProjectValue,
   SessionValue,
@@ -12,15 +16,10 @@ export type {
 };
 export type { ChangedFile, ToolCallStatus } from '../../server/src/types';
 
-import { atom } from 'jotai';
-import { useAtomValue } from 'jotai/react';
-import { createStreamDB, createStateSchema } from '@durable-streams/state';
+import { createStateSchema } from '@durable-streams/state';
 import type { StreamDB } from '@durable-streams/state';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import { useLiveQuery } from '@tanstack/react-db';
-import type { InitialQueryBuilder, Context, QueryBuilder } from '@tanstack/react-db';
-import { debouncedServerUrlAtom } from '../state/settings';
-import type { Message, ChangedFile, ToolCallStatus } from '../../server/src/types';
+import type { Message, ChangedFile } from '../../server/src/types';
 
 function passthrough<T>(): StandardSchemaV1<T> {
   return {
@@ -121,52 +120,6 @@ type AppStateDB = StreamDB<AppStateDef>;
 
 const appStateSchema = createStateSchema(appStateDef);
 
-const instanceIdAtom = atom(async (get) => {
-  const serverUrl = get(debouncedServerUrlAtom).replace(/\/$/, '');
-  try {
-    const res = await fetch(`${serverUrl}/`);
-    if (!res.ok) return null;
-    const { instanceId } = await res.json();
-    return instanceId as string;
-  } catch {
-    return null;
-  }
-});
-
-const dbAtom = atom(async (get) => {
-  const serverUrl = get(debouncedServerUrlAtom).replace(/\/$/, '');
-  const instanceId = await get(instanceIdAtom);
-
-  if (!instanceId) return { db: null, loading: true };
-
-  try {
-    const db = createStreamDB({
-      streamOptions: { url: `${serverUrl}/${instanceId}` },
-      state: stateSchema,
-    }) as StateDB;
-
-    await db.preload();
-    return { db, loading: false };
-  } catch {
-    return { db: null, loading: true };
-  }
-});
-
-const appDbAtom = atom(async (get) => {
-  const serverUrl = get(debouncedServerUrlAtom).replace(/\/$/, '');
-  try {
-    const db = createStreamDB({
-      streamOptions: { url: `${serverUrl}/app` }, // fixed URL, no instanceId
-      state: appStateSchema,
-    }) as AppStateDB;
-
-    await db.preload();
-    return { db, loading: false };
-  } catch {
-    return { db: null, loading: true };
-  }
-});
-
 // UI types derived from stream state
 
 /** Tool call state passed through to the UI via `toolMeta`. */
@@ -260,24 +213,4 @@ function flattenServerMessage(msg: Message): UIMessage[] {
   }
 
   return messages;
-}
-
-function useStateQuery<TContext extends Context>(
-  queryFn: (db: StateDB, q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null,
-  deps: unknown[] = []
-) {
-  const { db, loading } = useAtomValue(dbAtom);
-  const result = useLiveQuery((q) => db && queryFn(db, q), [db, ...deps]);
-  if (!db) return { data: null, isLoading: true, error: null };
-  return { ...result, isLoading: loading || result.isLoading };
-}
-
-function useAppStateQuery<TContext extends Context>(
-  queryFn: (db: AppStateDB, q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null,
-  deps: unknown[] = []
-) {
-  const { db, loading } = useAtomValue(appDbAtom);
-  const result = useLiveQuery((q) => db && queryFn(db, q), [db, ...deps]);
-  if (!db) return { data: null, isLoading: true, error: null };
-  return { ...result, isLoading: loading || result.isLoading };
 }

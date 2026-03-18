@@ -1,39 +1,29 @@
 import React, { useState, useCallback } from 'react'
-import { View, Text, Pressable, ScrollView, TextInput, Switch, ActivityIndicator } from 'react-native'
+import { View, Text, Pressable, ScrollView, TextInput, Switch, Alert } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
-import { ArrowLeft, ChevronDown } from 'lucide-react-native'
+import { ArrowLeft, ChevronDown, Monitor, Cloud, Plus, Pencil, Trash2 } from 'lucide-react-native'
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings'
+import type { BackendConfig, BackendType, BackendConnection, BackendUrl } from '../state/backends'
 
 interface SettingsScreenProps {
-  // Server
-  serverUrl: string
-  onServerUrlChange: (url: string) => void
+  backends: BackendConfig[]
+  onBackendsChange: (backends: BackendConfig[]) => void
+  connections: Record<string, BackendConnection>
   connection: ConnectionInfo
-
-  // Voice mode
   handsFreeAutoRecord: boolean
   onHandsFreeAutoRecordChange: (value: boolean) => void
   notificationSound: NotificationSound
   onNotificationSoundChange: (value: NotificationSound) => void
   notificationSoundOptions: { label: string; value: NotificationSound }[]
-  // About
   appVersion: string
-  defaultModel: string
-
-  // Model selection
-  onDefaultModelPress?: () => void
-
-  // Resync
-  onResyncConfig?: () => Promise<void>
-
-  // Navigation
   onBack: () => void
 }
 
 export function SettingsScreen({
-  serverUrl,
-  onServerUrlChange,
+  backends,
+  onBackendsChange,
+  connections,
   connection,
   handsFreeAutoRecord,
   onHandsFreeAutoRecordChange,
@@ -41,27 +31,47 @@ export function SettingsScreen({
   onNotificationSoundChange,
   notificationSoundOptions,
   appVersion,
-  defaultModel,
-  onDefaultModelPress,
-  onResyncConfig,
   onBack,
 }: SettingsScreenProps) {
   const insets = useSafeAreaInsets()
   const { colorScheme, setColorScheme } = useColorScheme()
-  const placeholderColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E'
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C'
   const mutedIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E'
-  const [resyncing, setResyncing] = useState(false)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
 
-  const handleResync = useCallback(async () => {
-    if (!onResyncConfig || resyncing) return
-    setResyncing(true)
-    try {
-      await onResyncConfig()
-    } finally {
-      setResyncing(false)
+  const handleAddBackend = useCallback(() => {
+    const newBackend: BackendConfig = {
+      url: '' as BackendUrl,
+      name: '',
+      type: 'sprite',
+      enabled: true,
     }
-  }, [onResyncConfig, resyncing])
+    onBackendsChange([...backends, newBackend])
+    setEditingIndex(backends.length)
+  }, [backends, onBackendsChange])
+
+  const handleUpdateBackend = useCallback((index: number, updates: Partial<BackendConfig>) => {
+    const updated = backends.map((b, i) => (i === index ? { ...b, ...updates } : b))
+    onBackendsChange(updated)
+  }, [backends, onBackendsChange])
+
+  const handleDeleteBackend = useCallback((index: number) => {
+    Alert.alert(
+      'Delete Server',
+      `Remove "${backends[index].name || backends[index].url}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            onBackendsChange(backends.filter((_, i) => i !== index))
+            if (editingIndex === index) setEditingIndex(null)
+          },
+        },
+      ],
+    )
+  }, [backends, onBackendsChange, editingIndex])
 
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
@@ -85,52 +95,35 @@ export function SettingsScreen({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 28) }}
       >
-        {/* SERVER section */}
-        <SectionHeader title="SERVER" />
+        {/* SERVERS section */}
+        <SectionHeader title="SERVERS" />
 
-        <View className="px-5 pb-1">
-          <Text className="text-sm font-medium text-stone-900 dark:text-stone-50 mb-2" style={{ fontFamily: 'JetBrains Mono' }}>Server URL</Text>
-          <TextInput
-            testID="server-url-input"
-            value={serverUrl}
-            onChangeText={onServerUrlChange}
-            placeholder="https://api.opencode.dev"
-            placeholderTextColor={placeholderColor}
-            className="bg-white dark:bg-stone-900 rounded-lg h-11 px-3.5 text-xs text-stone-900 dark:text-stone-50"
-            style={{ fontFamily: 'JetBrains Mono' }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-          <ConnectionStatusBadge connection={connection} />
-        </View>
+        <View className="px-5 gap-3">
+          {backends.map((backend, index) => (
+            <BackendEntry
+              key={`${backend.url}-${index}`}
+              backend={backend}
+              connection={connections[backend.url]}
+              isEditing={editingIndex === index}
+              onEdit={() => setEditingIndex(editingIndex === index ? null : index)}
+              onUpdate={(updates) => handleUpdateBackend(index, updates)}
+              onDelete={() => handleDeleteBackend(index)}
+            />
+          ))}
 
-        {onResyncConfig && (
-          <View className="px-5 mt-3">
-            <Pressable
-              onPress={handleResync}
-              disabled={resyncing}
-              className="flex-row items-center justify-center gap-2 bg-white dark:bg-stone-900 rounded-lg h-10"
-              style={{ opacity: resyncing ? 0.6 : 1 }}
-            >
-              {resyncing ? (
-                <ActivityIndicator size="small" color={colorScheme === 'dark' ? '#A8A29E' : '#44403C'} />
-              ) : null}
-              <Text
-                className="text-xs font-medium text-stone-700 dark:text-stone-400"
-                style={{ fontFamily: 'JetBrains Mono' }}
-              >
-                {resyncing ? 'Resyncing...' : 'Resync Config'}
-              </Text>
-            </Pressable>
+          <Pressable
+            onPress={handleAddBackend}
+            className="flex-row items-center justify-center gap-2 bg-white dark:bg-stone-900 rounded-lg h-10"
+          >
+            <Plus size={16} color={iconColor} />
             <Text
-              className="text-[10px] text-stone-400 dark:text-stone-600 mt-1.5 px-0.5"
+              className="text-xs font-medium text-stone-700 dark:text-stone-400"
               style={{ fontFamily: 'JetBrains Mono' }}
             >
-              Re-fetches available model options from the server.
+              Add Server
             </Text>
-          </View>
-        )}
+          </Pressable>
+        </View>
 
         {/* Divider */}
         <View className="h-px bg-stone-200 dark:bg-stone-800 mx-5 mt-4" />
@@ -206,7 +199,7 @@ export function SettingsScreen({
         <SectionHeader title="ABOUT" />
 
         <View className="px-5 py-3.5">
-          <View className="flex-row items-center justify-between mb-3">
+          <View className="flex-row items-center justify-between">
             <Text className="text-sm font-medium text-stone-900 dark:text-stone-50" style={{ fontFamily: 'JetBrains Mono' }}>Version</Text>
             <Text
               className="text-xs text-stone-700 dark:text-stone-400"
@@ -215,24 +208,189 @@ export function SettingsScreen({
               {appVersion}
             </Text>
           </View>
-          <Pressable
-            className="flex-row items-center justify-between"
-            onPress={onDefaultModelPress}
-            disabled={!onDefaultModelPress}
-          >
-            <Text className="text-sm font-medium text-stone-900 dark:text-stone-50" style={{ fontFamily: 'JetBrains Mono' }}>Default model</Text>
-            <View className="flex-row items-center gap-1.5">
-              <Text
-                className="text-xs text-stone-700 dark:text-stone-400"
-                style={{ fontFamily: 'JetBrains Mono' }}
-              >
-                {defaultModel}
-              </Text>
-              {onDefaultModelPress && <ChevronDown size={14} color={mutedIconColor} />}
-            </View>
-          </Pressable>
         </View>
       </ScrollView>
+    </View>
+  )
+}
+
+// --- Backend Entry ---
+
+interface BackendEntryProps {
+  backend: BackendConfig
+  connection: BackendConnection | undefined
+  isEditing: boolean
+  onEdit: () => void
+  onUpdate: (updates: Partial<BackendConfig>) => void
+  onDelete: () => void
+}
+
+function BackendEntry({ backend, connection, isEditing, onEdit, onUpdate, onDelete }: BackendEntryProps) {
+  const { colorScheme } = useColorScheme()
+  const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C'
+  const mutedIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E'
+  const placeholderColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E'
+  const TypeIcon = backend.type === 'local' ? Monitor : Cloud
+
+  const statusDot = connection?.status === 'connected'
+    ? 'bg-green-500'
+    : connection?.status === 'reconnecting'
+      ? 'bg-amber-500'
+      : connection?.status === 'error'
+        ? 'bg-red-500'
+        : 'bg-stone-400 dark:bg-stone-600'
+
+  const statusLabel = connection?.status === 'connected'
+    ? `Connected · ${connection.latencyMs}ms`
+    : connection?.status === 'reconnecting'
+      ? 'Connecting...'
+      : connection?.status === 'error'
+        ? connection.error ?? 'Connection failed'
+        : 'Offline'
+
+  return (
+    <View className="bg-white dark:bg-stone-900 rounded-lg overflow-hidden">
+      {/* Summary row */}
+      <View className="px-3.5 py-3 flex-row items-center gap-3">
+        <TypeIcon size={18} color={iconColor} />
+        <View className="flex-1 gap-0.5">
+          <Text
+            className="text-sm font-medium text-stone-900 dark:text-stone-50"
+            style={{ fontFamily: 'JetBrains Mono' }}
+            numberOfLines={1}
+          >
+            {backend.name || 'Unnamed'}
+          </Text>
+          <Text
+            className="text-[11px] text-stone-400 dark:text-stone-600"
+            style={{ fontFamily: 'JetBrains Mono' }}
+            numberOfLines={1}
+          >
+            {backend.url || 'No URL set'}
+          </Text>
+          <View className="flex-row items-center gap-1.5 mt-0.5">
+            <View className={`w-1.5 h-1.5 rounded-full ${statusDot}`} />
+            <Text
+              className="text-[10px] text-stone-500 dark:text-stone-500"
+              style={{ fontFamily: 'JetBrains Mono' }}
+            >
+              {statusLabel}
+            </Text>
+          </View>
+        </View>
+        <Pressable onPress={onEdit} hitSlop={8}>
+          <Pencil size={16} color={mutedIconColor} />
+        </Pressable>
+      </View>
+
+      {/* Edit form (shown when editing) */}
+      {isEditing && (
+        <View className="px-3.5 pb-3 gap-2.5 border-t border-stone-100 dark:border-stone-800 pt-2.5">
+          <View>
+            <Text className="text-[10px] text-stone-400 dark:text-stone-600 mb-1" style={{ fontFamily: 'JetBrains Mono' }}>
+              Name
+            </Text>
+            <TextInput
+              value={backend.name}
+              onChangeText={(name) => onUpdate({ name })}
+              placeholder="My MacBook"
+              placeholderTextColor={placeholderColor}
+              className="bg-stone-50 dark:bg-stone-950 rounded h-9 px-2.5 text-xs text-stone-900 dark:text-stone-50"
+              style={{ fontFamily: 'JetBrains Mono' }}
+            />
+          </View>
+          <View>
+            <Text className="text-[10px] text-stone-400 dark:text-stone-600 mb-1" style={{ fontFamily: 'JetBrains Mono' }}>
+              URL
+            </Text>
+            <TextInput
+              value={backend.url}
+              onChangeText={(url) => onUpdate({ url: url as BackendUrl })}
+              placeholder="http://localhost:3000"
+              placeholderTextColor={placeholderColor}
+              className="bg-stone-50 dark:bg-stone-950 rounded h-9 px-2.5 text-xs text-stone-900 dark:text-stone-50"
+              style={{ fontFamily: 'JetBrains Mono' }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+          </View>
+          <View>
+            <Text className="text-[10px] text-stone-400 dark:text-stone-600 mb-1" style={{ fontFamily: 'JetBrains Mono' }}>
+              Type
+            </Text>
+            <View className="flex-row gap-2">
+              {(['local', 'sprite'] as BackendType[]).map((t) => (
+                <Pressable
+                  key={t}
+                  onPress={() => onUpdate({ type: t })}
+                  className={`flex-1 h-8 rounded items-center justify-center ${
+                    backend.type === t
+                      ? 'bg-amber-500'
+                      : 'bg-stone-50 dark:bg-stone-950'
+                  }`}
+                >
+                  <Text
+                    className={`text-[11px] font-medium ${
+                      backend.type === t
+                        ? 'text-stone-950'
+                        : 'text-stone-600 dark:text-stone-500'
+                    }`}
+                    style={{ fontFamily: 'JetBrains Mono' }}
+                  >
+                    {t === 'local' ? 'Local' : 'Sprite'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          {backend.type === 'sprite' && (
+            <View>
+              <Text className="text-[10px] text-stone-400 dark:text-stone-600 mb-1" style={{ fontFamily: 'JetBrains Mono' }}>
+                Auth Token
+              </Text>
+              <TextInput
+                value={backend.authToken ?? ''}
+                onChangeText={(authToken) => onUpdate({ authToken: authToken || undefined })}
+                placeholder="Bearer token (optional)"
+                placeholderTextColor={placeholderColor}
+                className="bg-stone-50 dark:bg-stone-950 rounded h-9 px-2.5 text-xs text-stone-900 dark:text-stone-50"
+                style={{ fontFamily: 'JetBrains Mono' }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+              />
+            </View>
+          )}
+          <View className="flex-row items-center justify-between pt-1">
+            <View className="flex-row items-center gap-2">
+              <Text className="text-[11px] text-stone-500 dark:text-stone-500" style={{ fontFamily: 'JetBrains Mono' }}>
+                Enabled
+              </Text>
+              <Switch
+                value={backend.enabled}
+                onValueChange={(enabled) => onUpdate({ enabled })}
+                trackColor={{
+                  false: colorScheme === 'dark' ? '#292524' : '#E7E5E4',
+                  true: '#F59E0B',
+                }}
+                thumbColor="#FFFFFF"
+                style={{ transform: [{ scale: 0.8 }] }}
+              />
+            </View>
+            <Pressable
+              onPress={onDelete}
+              className="flex-row items-center gap-1"
+              hitSlop={8}
+            >
+              <Trash2 size={14} color="#ef4444" />
+              <Text className="text-[11px] text-red-500" style={{ fontFamily: 'JetBrains Mono' }}>
+                Delete
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
     </View>
   )
 }
@@ -247,40 +405,6 @@ function SectionHeader({ title }: { title: string }) {
         style={{ letterSpacing: 2, fontFamily: 'JetBrains Mono' }}
       >
         {title}
-      </Text>
-    </View>
-  )
-}
-
-interface ConnectionStatusBadgeProps {
-  connection: ConnectionInfo
-}
-
-function ConnectionStatusBadge({ connection }: ConnectionStatusBadgeProps) {
-  const { status } = connection
-
-  const dotColor = status === 'connected'
-    ? 'bg-green-500'
-    : status === 'reconnecting'
-      ? 'bg-amber-500'
-      : 'bg-red-500'
-
-  const label = status === 'connected'
-    ? `Connected · ${connection.latencyMs}ms`
-    : status === 'reconnecting'
-      ? 'Connecting...'
-      : status === 'error'
-        ? connection.error ?? 'Connection failed'
-        : 'Disconnected'
-
-  return (
-    <View className="flex-row items-center gap-2 mt-2">
-      <View className={`w-2 h-2 rounded-full ${dotColor}`} />
-      <Text
-        className={`text-xs ${status === 'error' ? 'text-red-500' : 'text-stone-700 dark:text-stone-400'}`}
-        style={{ fontFamily: 'JetBrains Mono' }}
-      >
-        {label}
       </Text>
     </View>
   )

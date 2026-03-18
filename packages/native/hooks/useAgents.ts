@@ -1,21 +1,24 @@
 import { useEffect, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { agentCatalogAtom, type AgentInfo } from '../state/settings';
-import { apiClientAtom } from '../lib/api';
-import { connectionInfoAtom } from '../state/settings';
+import { agentCatalogAtom, connectionInfoAtom, type AgentInfo } from '../state/settings';
+import { backendResourcesAtom } from '../lib/backend-streams';
+import { backendConnectionsAtom, type BackendUrl } from '../state/backends';
 
 /**
- * Fetches the agent catalog from the server and exposes agent state.
- * The catalog is re-fetched whenever the connection status transitions to
- * 'connected', mirroring the pattern in useModels.
+ * Fetches the agent catalog from a specific backend and exposes agent state.
+ * The catalog is re-fetched whenever the backend transitions to 'connected'.
  */
-export function useAgents() {
-  const api = useAtomValue(apiClientAtom);
-  const connection = useAtomValue(connectionInfoAtom);
+export function useAgents(backendUrl: BackendUrl) {
+  const resources = useAtomValue(backendResourcesAtom);
+  const connections = useAtomValue(backendConnectionsAtom);
   const setCatalog = useSetAtom(agentCatalogAtom);
   const catalog = useAtomValue(agentCatalogAtom);
 
+  const api = resources[backendUrl]?.api ?? null;
+  const connectionStatus = connections[backendUrl]?.status ?? 'reconnecting';
+
   const fetchAgents = useCallback(async () => {
+    if (!api) return;
     try {
       const res = await (api.api as any).agents.$get();
       if (!res.ok) return;
@@ -54,11 +57,11 @@ export function useAgents() {
     }
   }, [api, setCatalog]);
 
-  // Fetch catalog when connected
+  // Fetch catalog when backend becomes connected
   useEffect(() => {
-    if (connection.status !== 'connected') return;
+    if (connectionStatus !== 'connected') return;
     fetchAgents();
-  }, [connection.status, fetchAgents]);
+  }, [connectionStatus, fetchAgents]);
 
   // Only show primary agents in the selector (subagents are invoked by the model)
   const primaryAgents = catalog?.filter((a) => a.mode === 'primary' || a.mode === 'all') ?? null;

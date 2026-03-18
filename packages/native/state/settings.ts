@@ -2,27 +2,35 @@ import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import { asyncStorageAdapter } from '../lib/jotai-async-storage';
-
-const DEFAULT_SERVER_URL = 'http://localhost:3000';
-
-export const serverUrlAtom = atomWithStorage('settings:serverUrl', DEFAULT_SERVER_URL, asyncStorageAdapter<string>());
-
-/**
- * Debounced version of serverUrlAtom — updates 1 s after the last write to
- * serverUrlAtom.  Downstream consumers (health check, API client) should read
- * this instead of serverUrlAtom so they don't thrash on every keystroke.
- *
- * The atom is writable so the debounce listener can push values into it, but
- * external code should treat it as read-only.
- */
-export const debouncedServerUrlAtom = atom(DEFAULT_SERVER_URL);
+import { backendConnectionsAtom } from './backends';
 
 export const handsFreeAutoRecordAtom = atom(true);
 export const notificationSoundAtom = atom<NotificationSound>('chime');
-export const connectionInfoAtom = atom<ConnectionInfo>({
-  status: 'reconnecting',
-  latencyMs: null,
-  error: null,
+
+/**
+ * Aggregate connection info across all backends.
+ * Reports 'connected' if any backend is connected, 'reconnecting' if any is
+ * reconnecting and none are connected, 'error' otherwise.
+ */
+export const connectionInfoAtom = atom<ConnectionInfo>((get) => {
+  const connections = Object.values(get(backendConnectionsAtom));
+  if (connections.length === 0) {
+    return { status: 'reconnecting', latencyMs: null, error: null };
+  }
+  const connected = connections.find((c) => c.status === 'connected');
+  if (connected) {
+    return { status: 'connected', latencyMs: connected.latencyMs, error: null };
+  }
+  const reconnecting = connections.find((c) => c.status === 'reconnecting');
+  if (reconnecting) {
+    return { status: 'reconnecting', latencyMs: null, error: null };
+  }
+  const errored = connections[0];
+  return {
+    status: 'error',
+    latencyMs: null,
+    error: errored.error,
+  };
 });
 
 /** Model selection. */

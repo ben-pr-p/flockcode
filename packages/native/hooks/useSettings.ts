@@ -1,70 +1,56 @@
-import { useEffect, useRef } from 'react'
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'
-import * as Updates from 'expo-updates'
-import Constants from 'expo-constants'
+import { useAtom, useAtomValue } from 'jotai';
+import * as Updates from 'expo-updates';
+import Constants from 'expo-constants';
 import {
-  serverUrlAtom,
-  debouncedServerUrlAtom,
   handsFreeAutoRecordAtom,
   notificationSoundAtom,
   connectionInfoAtom,
-} from '../state/settings'
+} from '../state/settings';
+import { NOTIFICATION_SOUND_OPTIONS } from '../__fixtures__/settings';
 import {
-  FIXTURE_SETTINGS,
-  NOTIFICATION_SOUND_OPTIONS,
-} from '../__fixtures__/settings'
-import { useServerHealth } from './useServerHealth'
+  backendsAtom,
+  backendConnectionsAtom,
+  type BackendConfig,
+  type BackendConnection,
+} from '../state/backends';
 
-const DEBOUNCE_MS = 1_000
 
 export function useSettings() {
-  const [serverUrl, setServerUrl] = useAtom(serverUrlAtom)
-  const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useAtom(handsFreeAutoRecordAtom)
-  const [notificationSound, setNotificationSound] = useAtom(notificationSoundAtom)
+  const [backends, setBackends] = useAtom(backendsAtom);
+  const resolvedBackends = backends instanceof Promise ? [] : backends;
+  const connections = useAtomValue(backendConnectionsAtom);
+  const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useAtom(handsFreeAutoRecordAtom);
+  const [notificationSound, setNotificationSound] = useAtom(notificationSoundAtom);
 
-  // Debounce serverUrl → debouncedServerUrlAtom so downstream consumers
-  // (health check, API client) don't thrash on every keystroke.
-  const setDebouncedUrl = useSetAtom(debouncedServerUrlAtom)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      setDebouncedUrl(serverUrl)
-    }, DEBOUNCE_MS)
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [serverUrl, setDebouncedUrl])
-
-  const debouncedUrl = useAtomValue(debouncedServerUrlAtom)
-
-  // Ping health endpoint using the debounced URL
-  useServerHealth(debouncedUrl)
-  const connection = useAtomValue(connectionInfoAtom)
+  // Aggregate connection info across all backends
+  const connection = useAtomValue(connectionInfoAtom);
 
   // Build version string from real app version + OTA update ID when available
-  const nativeVersion = Constants.expoConfig?.version ?? '0.0.0'
-  const updateId = Updates.updateId
+  const nativeVersion = Constants.expoConfig?.version ?? '0.0.0';
+  const updateId = Updates.updateId;
   const appVersion = updateId
     ? `${nativeVersion} (${updateId.slice(0, 8)})`
-    : nativeVersion
+    : nativeVersion;
 
-  // Detect if expo-updates rolled back due to a crash in a previous update.
-  // When true, the update was automatically reverted to the previously working version.
-  const isEmergencyLaunch = Updates.isEmergencyLaunch
+  const isEmergencyLaunch = Updates.isEmergencyLaunch;
 
   return {
-    serverUrl,
-    setServerUrl,
     connection,
+
+    // Multi-backend API
+    backends: resolvedBackends,
+    setBackends,
+    connections,
+
+    // Voice settings
     handsFreeAutoRecord,
     setHandsFreeAutoRecord,
     notificationSound,
     setNotificationSound,
     notificationSoundOptions: NOTIFICATION_SOUND_OPTIONS,
+
+    // App info
     appVersion,
     isEmergencyLaunch,
-    defaultModel: FIXTURE_SETTINGS.defaultModel,
-  }
+  };
 }

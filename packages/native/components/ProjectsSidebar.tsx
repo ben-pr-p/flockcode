@@ -1,14 +1,14 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { ActivityIndicator, View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom } from 'jotai';
 import { X, Plus } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { ProjectCard } from './ProjectCard';
-import { useStateQuery, type ProjectValue } from '../lib/stream-db';
+import { MergedStateQuery } from '../lib/merged-query';
+import type { ProjectValue } from '../lib/stream-db';
 import { projectFilterAtom, pinnedProjectIdsAtom } from '../state/ui';
-import { apiClientAtom } from '../lib/api';
 import { useArchivedSessionIds } from '../hooks/useArchivedSessionIds';
 
 interface ProjectGroup {
@@ -24,32 +24,25 @@ interface ProjectGroup {
 function deriveGroups(projects: ProjectValue[]): ProjectGroup[] {
   if (projects.length === 0) return [];
 
-  // Count projects per parent directory
   const parentCounts = new Map<string, number>();
   for (const p of projects) {
     const segments = p.worktree.split('/');
-    // Take everything except the last segment (the project dir itself)
     if (segments.length >= 2) {
       const parent = segments.slice(0, -1).join('/');
       parentCounts.set(parent, (parentCounts.get(parent) ?? 0) + 1);
     }
   }
 
-  // Only keep parents with 2+ projects
   const groups: ProjectGroup[] = [];
   for (const [prefix, count] of parentCounts) {
     if (count >= 2) {
-      // Use the last segment of the parent path as the label
       const label = prefix.split('/').pop() ?? prefix;
       groups.push({ label, prefix });
     }
   }
 
-  // Sort groups alphabetically by label
   groups.sort((a, b) => a.label.localeCompare(b.label));
 
-  // Only return groups if there are at least 2 distinct ones
-  // (a single group means all projects are in the same place — not useful)
   if (groups.length < 2) return [];
 
   return [{ label: 'All', prefix: null }, ...groups];
@@ -65,12 +58,36 @@ export function ProjectsSidebar({
   selectedProjectId,
   onClose,
 }: ProjectsSidebarProps) {
+  return (
+    <MergedStateQuery<ProjectValue>
+      query={(db, q) => q.from({ projects: db.collections.projects })}
+    >
+      {({ data: rawProjects, isLoading }) => (
+        <ProjectsSidebarContent
+          rawProjects={rawProjects}
+          isLoading={isLoading}
+          selectedProjectId={selectedProjectId}
+          onClose={onClose}
+        />
+      )}
+    </MergedStateQuery>
+  );
+}
+
+function ProjectsSidebarContent({
+  rawProjects,
+  isLoading,
+  selectedProjectId,
+  onClose,
+}: {
+  rawProjects: ProjectValue[] | null;
+  isLoading: boolean;
+  selectedProjectId: string | null;
+  onClose: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useAtom(projectFilterAtom);
-  const { data: rawProjects, isLoading } = useStateQuery((db, q) =>
-    q.from({ projects: db.collections.projects })
-  );
   const projects = rawProjects?.slice().sort((a, b) => b.time.created - a.time.created) ?? [];
   const { colorScheme } = useColorScheme();
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C';
@@ -79,7 +96,6 @@ export function ProjectsSidebar({
   const showCount = projects.length >= 8;
 
   const router = useRouter();
-  const api = useAtomValue(apiClientAtom);
 
   const archivedIds = useArchivedSessionIds();
 
@@ -118,10 +134,12 @@ export function ProjectsSidebar({
 
   const groups = useMemo(() => deriveGroups(projects), [projects]);
 
-  // Reset filter if it no longer matches any group (e.g. project was removed)
   const validFilter =
     activeFilter && groups.some((g) => g.prefix === activeFilter) ? activeFilter : null;
-  if (validFilter !== activeFilter) setActiveFilter(validFilter);
+
+  useEffect(() => {
+    if (validFilter !== activeFilter) setActiveFilter(validFilter);
+  }, [validFilter, activeFilter, setActiveFilter]);
 
   // Apply group filter (pinned projects always pass), then text search, then sort pinned to top
   const groupFiltered = validFilter
@@ -141,32 +159,16 @@ export function ProjectsSidebar({
   }, [searchFiltered, pinnedProjectSet]);
 
   const handleSelectProject = useCallback(
-    async (pid: string) => {
+    (pid: string) => {
       onClose();
-      // Try to find existing sessions for this project
-      try {
-        const res = await api.api.projects[':projectId'].sessions.$get({
-          param: { projectId: pid },
-        });
-        if (res.ok) {
-          const sessions = (await res.json()) as any[];
-          // Skip child sessions and archived sessions — only navigate to top-level active sessions
-          const topLevel = sessions.filter((s: any) => !s.parentID && !archivedIds.has(s.id));
-          if (topLevel.length > 0) {
-            router.push({
-              pathname: '/projects/[projectId]/sessions/[sessionId]',
-              params: { projectId: pid, sessionId: topLevel[0].id },
-            });
-            return;
-          }
-        }
-      } catch {}
+      // Navigate to new-session for the project — the session sidebar
+      // shows existing sessions via the merged stream.
       router.push({
         pathname: '/projects/[projectId]/new-session',
         params: { projectId: pid },
       });
     },
-    [api, router, onClose, archivedIds],
+    [router, onClose],
   );
 
   return (

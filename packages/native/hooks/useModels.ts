@@ -7,17 +7,20 @@ import {
   type ModelSelection,
   type CatalogModel,
 } from '../state/settings';
-import { apiClientAtom } from '../lib/api';
-import { connectionInfoAtom } from '../state/settings';
+import { backendResourcesAtom } from '../lib/backend-streams';
+import { backendConnectionsAtom, type BackendUrl } from '../state/backends';
+import type { ApiClient } from '../lib/api';
 
 /**
  * Fetches the provider/model catalog from the server and exposes model
- * selection state. The catalog is re-fetched whenever the connection status
- * transitions to 'connected'.
+ * selection state.
+ *
+ * Accepts an optional `backendUrl` to fetch from a specific backend.
+ * If omitted, fetches from all connected backends and merges the catalogs.
  */
-export function useModels() {
-  const api = useAtomValue(apiClientAtom);
-  const connection = useAtomValue(connectionInfoAtom);
+export function useModels(backendUrl: BackendUrl) {
+  const resources = useAtomValue(backendResourcesAtom);
+  const connections = useAtomValue(backendConnectionsAtom);
   const [selectedModel, setSelectedModel] = useAtom(selectedModelAtom);
   const setCatalog = useSetAtom(modelCatalogAtom);
   const setDefaults = useSetAtom(modelDefaultsAtom);
@@ -25,48 +28,67 @@ export function useModels() {
   const defaults = useAtomValue(modelDefaultsAtom);
 
   const fetchCatalog = useCallback(async () => {
-    try {
-      const res = await (api.api as any).models.$get();
-      if (!res.ok) return;
-      const data = await res.json();
+    // Determine which backends to fetch from
+    const apis: ApiClient[] = backendUrl
+      ? [resources[backendUrl]?.api].filter((a): a is ApiClient => a != null)
+      : Object.values(resources)
+          .filter((r) => r.api != null)
+          .map((r) => r.api!);
 
-      // data shape: { all: Provider[], default: Record<string, string>, connected: string[] }
-      const connectedSet = new Set(data.connected ?? []);
-      const models: CatalogModel[] = [];
+    if (apis.length === 0) return;
 
-      for (const provider of data.all ?? []) {
-        // Only include connected providers
-        if (!connectedSet.has(provider.id)) continue;
+    const allModels: CatalogModel[] = [];
+    let mergedDefaults: Record<string, string> = {};
 
-        for (const [modelId, model] of Object.entries(provider.models ?? {})) {
-          const m = model as any;
-          models.push({
-            id: modelId,
-            name: m.name ?? modelId,
-            providerID: provider.id,
-            providerName: provider.name ?? provider.id,
-            status: m.status,
-          });
+    for (const api of apis) {
+      try {
+        const res = await (api.api as any).models.$get();
+        if (!res.ok) continue;
+        const data = await res.json();
+
+        const connectedSet = new Set(data.connected ?? []);
+
+        for (const provider of data.all ?? []) {
+          if (!connectedSet.has(provider.id)) continue;
+
+          for (const [modelId, model] of Object.entries(provider.models ?? {})) {
+            const m = model as any;
+            // Dedup by providerID + modelID
+            if (
+              !allModels.some(
+                (existing) => existing.id === modelId && existing.providerID === provider.id
+              )
+            ) {
+              allModels.push({
+                id: modelId,
+                name: m.name ?? modelId,
+                providerID: provider.id,
+                providerName: provider.name ?? provider.id,
+                status: m.status,
+              });
+            }
+          }
         }
+
+        // Merge defaults — last one wins
+        mergedDefaults = { ...mergedDefaults, ...(data.default ?? {}) };
+      } catch (err) {
+        console.error('[useModels] Failed to fetch model catalog:', err);
       }
-
-      setCatalog(models);
-      setDefaults(data.default ?? {});
-    } catch (err) {
-      console.error('[useModels] Failed to fetch model catalog:', err);
     }
-  }, [api, setCatalog, setDefaults]);
 
-  // Fetch catalog when connected
+    setCatalog(allModels);
+    setDefaults(mergedDefaults);
+  }, [resources, backendUrl, setCatalog, setDefaults]);
+
+  // Fetch catalog when any backend connects
+  const connectionValues = Object.values(connections);
+  const anyConnected = connectionValues.some((c) => c.status === 'connected');
   useEffect(() => {
-    if (connection.status !== 'connected') return;
+    if (!anyConnected) return;
     fetchCatalog();
-  }, [connection.status, fetchCatalog]);
+  }, [anyConnected, fetchCatalog]);
 
-  /**
-   * Look up display names for a modelID/providerID pair from the catalog.
-   * Falls back to the raw IDs if not found.
-   */
   const getDisplayNames = useCallback(
     (modelID?: string, providerID?: string): { modelName: string; providerName: string } => {
       if (!modelID || !catalog) {
@@ -76,24 +98,18 @@ export function useModels() {
       if (match) {
         return { modelName: match.name, providerName: match.providerName };
       }
-      // Try matching just modelID (provider might differ)
       const byModel = catalog.find((m) => m.id === modelID);
       if (byModel) {
         return { modelName: byModel.name, providerName: byModel.providerName };
       }
-      // Fallback: prettify raw model ID
       return {
         modelName: prettifyModelId(modelID),
         providerName: providerID ?? '',
       };
     },
-    [catalog],
+    [catalog]
   );
 
-  /**
-   * Get the default model selection from the server config.
-   * The server returns defaults like { "": "anthropic/claude-sonnet-4-20250514" }
-   */
   const getDefaultModel = useCallback((): ModelSelection | null => {
     const defaultStr = defaults[''];
     if (!defaultStr) return null;
@@ -118,9 +134,7 @@ export function useModels() {
 
 /** Convert a raw model ID like "claude-sonnet-4-20250514" to "Claude Sonnet 4" */
 function prettifyModelId(modelId: string): string {
-  // Strip date suffixes like -20250514
   const withoutDate = modelId.replace(/-\d{8}$/, '');
-  // Capitalize words, replace hyphens with spaces
   return withoutDate
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
