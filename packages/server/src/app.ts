@@ -7,6 +7,7 @@ import { customAlphabet } from "nanoid"
 import { z } from "zod/v4"
 import { zValidator } from "@hono/zod-validator"
 import { createClient, Opencode, handleOpencodeEvent } from "./opencode"
+import { env } from "./env"
 import { StateStream } from "./state-stream"
 import { sendPrompt } from "./prompt"
 import { WorktreeDriver } from "./worktree"
@@ -86,7 +87,7 @@ export async function createApp(opencodeUrl: string) {
 
   // Optional bearer token auth — required when MOBILE_AGENTS_AUTH_TOKEN is set
   // (e.g., on a publicly accessible Fly Sprite). No-op when running locally.
-  const authToken = process.env.MOBILE_AGENTS_AUTH_TOKEN
+  const authToken = env.MOBILE_AGENTS_AUTH_TOKEN
   if (authToken) {
     app.use('*', async (c, next) => {
       const header = c.req.header('Authorization')
