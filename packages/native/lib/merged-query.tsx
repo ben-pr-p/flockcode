@@ -48,6 +48,8 @@ export function MergedStateQuery<T>({ query, deps = [], children }: MergedStateQ
   const resourceMap = useAtomValue(backendResourcesAtom);
   const backends = Object.values(resourceMap).filter((r) => r.db != null);
 
+  console.log({ backends, resourceMap });
+
   if (backends.length === 0) {
     return <>{children({ data: null, isLoading: true })}</>;
   }
@@ -59,8 +61,7 @@ export function MergedStateQuery<T>({ query, deps = [], children }: MergedStateQ
       accumulated={[]}
       anyLoading={false}
       query={query}
-      deps={deps}
-    >
+      deps={deps}>
       {children}
     </StateQueryAccumulator>
   );
@@ -89,6 +90,7 @@ function StateQueryAccumulator<T>({
   const db = backend.db!;
 
   const result = useLiveQuery((q) => query(db, q), [db, ...deps]);
+  console.log({ backend, result });
   const rawData = (result.data as T[] | null) ?? [];
   const tagged = rawData.map((item) => ({ ...item, backendUrl: backend.url }));
   const merged = [...accumulated, ...tagged];
@@ -102,8 +104,7 @@ function StateQueryAccumulator<T>({
         accumulated={merged}
         anyLoading={loading}
         query={query}
-        deps={deps}
-      >
+        deps={deps}>
         {children}
       </StateQueryAccumulator>
     );
@@ -124,7 +125,11 @@ interface MergedAppStateQueryProps<T> {
  * Same as MergedStateQuery but for AppStateDB (persistent per-backend state
  * like archive/session metadata).
  */
-export function MergedAppStateQuery<T>({ query, deps = [], children }: MergedAppStateQueryProps<T>) {
+export function MergedAppStateQuery<T>({
+  query,
+  deps = [],
+  children,
+}: MergedAppStateQueryProps<T>) {
   const resourceMap = useAtomValue(backendResourcesAtom);
   const backends = Object.values(resourceMap).filter((r) => r.appDb != null);
 
@@ -139,8 +144,7 @@ export function MergedAppStateQuery<T>({ query, deps = [], children }: MergedApp
       accumulated={[]}
       anyLoading={false}
       query={query}
-      deps={deps}
-    >
+      deps={deps}>
       {children}
     </AppStateQueryAccumulator>
   );
@@ -182,8 +186,7 @@ function AppStateQueryAccumulator<T>({
         accumulated={merged}
         anyLoading={loading}
         query={query}
-        deps={deps}
-      >
+        deps={deps}>
         {children}
       </AppStateQueryAccumulator>
     );
@@ -201,7 +204,7 @@ function AppStateQueryAccumulator<T>({
 export function useBackendStateQuery<T>(
   backendUrl: BackendUrl,
   query: (db: StateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null,
-  deps: unknown[] = [],
+  deps: unknown[] = []
 ): { data: T[] | null; isLoading: boolean } {
   const resourceMap = useAtomValue(backendResourcesAtom);
   const resources = resourceMap[backendUrl];
@@ -219,7 +222,7 @@ export function useBackendStateQuery<T>(
 export function useBackendAppStateQuery<T>(
   backendUrl: BackendUrl,
   query: (db: AppStateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null,
-  deps: unknown[] = [],
+  deps: unknown[] = []
 ): { data: T[] | null; isLoading: boolean } {
   const resourceMap = useAtomValue(backendResourcesAtom);
   const resources = resourceMap[backendUrl];

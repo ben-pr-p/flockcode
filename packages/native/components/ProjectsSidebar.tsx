@@ -9,7 +9,7 @@ import { ProjectCard } from './ProjectCard';
 import { MergedStateQuery } from '../lib/merged-query';
 import type { ProjectValue } from '../lib/stream-db';
 import { projectFilterAtom, pinnedProjectIdsAtom } from '../state/ui';
-import { useArchivedSessionIds } from '../hooks/useArchivedSessionIds';
+
 
 interface ProjectGroup {
   label: string;
@@ -97,8 +97,6 @@ function ProjectsSidebarContent({
 
   const router = useRouter();
 
-  const archivedIds = useArchivedSessionIds();
-
   const [pinnedProjectIds, setPinnedProjectIds] = useAtom(pinnedProjectIdsAtom);
   const resolvedPinnedProjectIds = pinnedProjectIds instanceof Promise ? [] : pinnedProjectIds;
   const pinnedProjectSet = useMemo(() => new Set(resolvedPinnedProjectIds), [resolvedPinnedProjectIds]);
@@ -161,10 +159,10 @@ function ProjectsSidebarContent({
   const handleSelectProject = useCallback(
     (pid: string) => {
       onClose();
-      // Navigate to new-session for the project — the session sidebar
-      // shows existing sessions via the merged stream.
+      // Navigate to the project index, which resolves the most recent
+      // non-archived session or falls back to new-session.
       router.push({
-        pathname: '/projects/[projectId]/new-session',
+        pathname: '/projects/[projectId]',
         params: { projectId: pid },
       });
     },

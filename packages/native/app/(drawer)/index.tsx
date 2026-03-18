@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useColorScheme } from 'nativewind';
 import { useRouter } from 'expo-router';
 import { useNavigation, DrawerActions, type NavigationProp } from '@react-navigation/native';
 import { SessionHeader } from '../../components/SessionHeader';
@@ -20,8 +21,7 @@ export default function IndexScreen() {
 
   return (
     <MergedStateQuery<ProjectValue>
-      query={(db, q) => q.from({ projects: db.collections.projects })}
-    >
+      query={(db, q) => q.from({ projects: db.collections.projects })}>
       {({ data: rawProjects, isLoading }) => (
         <IndexContent
           rawProjects={rawProjects}
@@ -51,29 +51,27 @@ function IndexContent({
   navigation: NavigationProp<any>;
   openRightDrawer: () => void;
 }) {
+  const { colorScheme } = useColorScheme();
   const projects = useMemo(
-    () =>
-      rawProjects
-        ?.slice()
-        .sort((a, b) => b.time.created - a.time.created) ?? [],
-    [rawProjects],
+    () => rawProjects?.slice().sort((a, b) => b.time.created - a.time.created) ?? [],
+    [rawProjects]
   );
 
-  // Auto-navigate to the most recent project on initial load.
-  // We navigate to the new-session screen and let the session sidebar
-  // show existing sessions. No need to fetch sessions via API here.
+  console.log({ location: '/', projects });
+
+  // Auto-navigate to the most recent project's index, which will in turn
+  // resolve the most recent non-archived session or fall back to new-session.
   const hasAutoNavigated = useRef(false);
   useEffect(() => {
     if (hasAutoNavigated.current) return;
-    if (projects.length === 0) return;
+    if (isLoading || projects.length === 0) return;
     hasAutoNavigated.current = true;
 
-    const pid = projects[0].id;
     router.replace({
-      pathname: '/projects/[projectId]/new-session',
-      params: { projectId: pid },
+      pathname: '/projects/[projectId]',
+      params: { projectId: projects[0].id },
     });
-  }, [projects, router]);
+  }, [isLoading, projects, router]);
 
   return (
     <View className="flex-1 bg-stone-50 dark:bg-stone-950" style={{ paddingTop: insets.top }}>
@@ -84,11 +82,17 @@ function IndexContent({
         onMenuPress={() => navigation.dispatch(DrawerActions.openDrawer())}
         onProjectsPress={openRightDrawer}
       />
-      <View className="flex-1 items-center justify-center px-8">
-        <Text className="text-center text-sm text-stone-400 dark:text-stone-600">
-          Select a project to get started
-        </Text>
-      </View>
+      {isLoading || projects.length > 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="small" color={colorScheme === 'dark' ? '#A8A29E' : '#78716C'} />
+        </View>
+      ) : (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-center text-sm text-stone-400 dark:text-stone-600">
+            Select a project to get started
+          </Text>
+        </View>
+      )}
     </View>
   );
 }

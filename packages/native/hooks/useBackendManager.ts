@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { loadable } from 'jotai/utils';
 import { hc } from 'hono/client';
 import { createStreamDB } from '@durable-streams/state';
 import type { AppType } from '../../server/src/app';
@@ -50,11 +51,7 @@ function createApiClient(url: string, authToken?: string): ApiClient {
 /**
  * Creates a StateDB connected to a backend's ephemeral stream.
  */
-function createStateDB(
-  url: string,
-  instanceId: string,
-  authToken?: string,
-): StateDB {
+function createStateDB(url: string, instanceId: string, authToken?: string): StateDB {
   const cleanUrl = url.replace(/\/$/, '');
   return createStreamDB({
     streamOptions: {
@@ -79,6 +76,9 @@ function createAppStateDB(url: string, authToken?: string): AppStateDB {
   }) as AppStateDB;
 }
 
+// Loadable wrapper so we can distinguish "not yet loaded" from "loaded []"
+const backendsLoadableAtom = loadable(backendsAtom);
+
 /**
  * Core orchestration hook that manages connections to all enabled backends.
  *
@@ -96,8 +96,7 @@ function createAppStateDB(url: string, authToken?: string): AppStateDB {
  * Mount once at the app root.
  */
 export function useBackendManager() {
-  const backends = useAtomValue(backendsAtom);
-  const resolvedBackends = backends instanceof Promise ? [] : backends;
+  const backendsLoadable = useAtomValue(backendsLoadableAtom);
   const setConnections = useSetAtom(backendConnectionsAtom);
   const setResources = useSetAtom(backendResourcesAtom);
 
@@ -105,36 +104,40 @@ export function useBackendManager() {
   const stateRef = useRef<Map<BackendUrl, PerBackendState>>(new Map());
 
   useEffect(() => {
-    const enabledBackends = resolvedBackends.filter((b) => b.enabled);
+    // Wait for AsyncStorage to resolve before acting
+    if (backendsLoadable.state !== 'hasData') return;
+
+    const enabledBackends = backendsLoadable.data.filter((b) => b.enabled);
     const enabledUrls = new Set(enabledBackends.map((b) => b.url));
 
-    // Tear down backends that are no longer enabled
-    for (const [url, state] of stateRef.current) {
-      if (!enabledUrls.has(url)) {
-        tearDown(state);
-        stateRef.current.delete(url);
-        // Remove from atoms
-        setConnections((prev) => {
-          const next = { ...prev };
-          delete next[url];
-          return next;
-        });
-        setResources((prev) => {
-          const next = { ...prev };
-          delete next[url];
-          return next;
-        });
-      }
+    // Compute action buckets against the ref now (inside the effect, always current)
+    const toTearDown = [...stateRef.current.keys()].filter((url) => !enabledUrls.has(url));
+    const toStart = enabledBackends.filter((b) => !stateRef.current.has(b.url));
+    const alreadyRunning = enabledBackends.filter((b) => stateRef.current.has(b.url));
+
+    console.log({ toStart, toTearDown, alreadyRunning });
+
+    // --- Tear down removed backends ---
+    for (const url of toTearDown) {
+      const state = stateRef.current.get(url);
+      if (state) tearDown(state);
+      stateRef.current.delete(url);
+    }
+    if (toTearDown.length > 0) {
+      setConnections((prev) => {
+        const next = { ...prev };
+        for (const url of toTearDown) delete next[url];
+        return next;
+      });
+      setResources((prev) => {
+        const next = { ...prev };
+        for (const url of toTearDown) delete next[url];
+        return next;
+      });
     }
 
-    // Start/update per-backend loops
-    for (const backend of enabledBackends) {
-      if (stateRef.current.has(backend.url)) {
-        // Already running — update is handled by the existing loop detecting
-        // config changes via the backend reference
-        continue;
-      }
-
+    // --- Initialize and start polling for new backends ---
+    for (const backend of toStart) {
       const perBackend: PerBackendState = {
         instanceId: null,
         db: null,
@@ -144,6 +147,7 @@ export function useBackendManager() {
         abortController: null,
         cancelled: false,
       };
+      // Register in ref immediately so subsequent renders see it as already running
       stateRef.current.set(backend.url, perBackend);
 
       // Set initial connection state
@@ -158,48 +162,46 @@ export function useBackendManager() {
         } satisfies BackendConnection,
       }));
 
-      // Set initial resources
+      // Create API client and set initial resources
+      perBackend.api = createApiClient(backend.url, backend.authToken);
       setResources((prev) => ({
         ...prev,
         [backend.url]: {
           url: backend.url,
           db: null,
           appDb: null,
-          api: null,
+          api: perBackend.api,
           loading: true,
         } satisfies BackendResources,
       }));
 
-      // Create API client immediately
-      perBackend.api = createApiClient(backend.url, backend.authToken);
-      setResources((prev) => ({
-        ...prev,
-        [backend.url]: {
-          ...prev[backend.url],
-          api: perBackend.api,
-        } as BackendResources,
-      }));
-
-      // Start health polling
       startPolling(backend, perBackend, setConnections, setResources);
     }
+  // backendsLoadable changes identity each render when state is 'loading';
+  // only re-run when it transitions to hasData or the data itself changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendsLoadable.state === 'hasData' ? backendsLoadable.data : null]);
 
+  // Tear down all backends only on unmount
+  useEffect(() => {
     return () => {
-      // Cleanup all backends on unmount
       for (const [, state] of stateRef.current) {
         tearDown(state);
       }
       stateRef.current.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedBackends]);
+  }, []);
 }
 
 function startPolling(
   backend: BackendConfig,
   state: PerBackendState,
-  setConnections: (fn: (prev: Record<string, BackendConnection>) => Record<string, BackendConnection>) => void,
-  setResources: (fn: (prev: Record<string, BackendResources>) => Record<string, BackendResources>) => void,
+  setConnections: (
+    fn: (prev: Record<string, BackendConnection>) => Record<string, BackendConnection>
+  ) => void,
+  setResources: (
+    fn: (prev: Record<string, BackendResources>) => Record<string, BackendResources>
+  ) => void
 ) {
   async function poll() {
     if (state.cancelled) return;
@@ -240,38 +242,49 @@ function startPolling(
       const data = await res.json();
       const newInstanceId = data.instanceId as string | undefined;
 
+      console.log('[poll]', { newInstanceId, currentInstanceId: state.instanceId, willCreateDB: !!(newInstanceId && newInstanceId !== state.instanceId) });
+
       // Detect instanceId change (server restart)
       if (newInstanceId && newInstanceId !== state.instanceId) {
-        // Tear down old StreamDBs
+        // Tear down old ephemeral StreamDB
         if (state.db) {
-          try { state.db.close(); } catch { /* ignore */ }
+          try {
+            state.db.close();
+          } catch {
+            /* ignore */
+          }
         }
 
         state.instanceId = newInstanceId;
 
-        // Create new StreamDBs
+        // Create new ephemeral StreamDB
         try {
           const db = createStateDB(backend.url, newInstanceId, backend.authToken);
           await db.preload();
           state.db = db;
+          console.log('[poll] StateDB created', backend.url);
         } catch (err) {
           console.error(`[useBackendManager] Failed to create StateDB for ${backend.url}:`, err);
           state.db = null;
         }
 
-        // Create app DB (only on first connect — the /app stream is persistent)
+        // Create persistent app StreamDB (only once — /app stream survives restarts)
         if (!state.appDb) {
           try {
             const appDb = createAppStateDB(backend.url, backend.authToken);
             await appDb.preload();
             state.appDb = appDb;
+            console.log('[poll] AppStateDB created', backend.url);
           } catch (err) {
-            console.error(`[useBackendManager] Failed to create AppStateDB for ${backend.url}:`, err);
+            console.error(
+              `[useBackendManager] Failed to create AppStateDB for ${backend.url}:`,
+              err
+            );
             state.appDb = null;
           }
         }
 
-        // Update resources atom
+        // Publish updated resources
         setResources((prev) => ({
           ...prev,
           [backend.url]: {
@@ -284,7 +297,7 @@ function startPolling(
         }));
       }
 
-      // Update connection state
+      // Update connection status
       setConnections((prev) => ({
         ...prev,
         [backend.url]: {
@@ -311,9 +324,8 @@ function startPolling(
     }
   }
 
-  // Initial poll
+  // Initial poll immediately, then on interval
   poll();
-  // Periodic polling
   state.intervalId = setInterval(poll, POLL_INTERVAL);
 }
 
@@ -322,9 +334,17 @@ function tearDown(state: PerBackendState) {
   if (state.intervalId) clearInterval(state.intervalId);
   state.abortController?.abort();
   if (state.db) {
-    try { state.db.close(); } catch { /* ignore */ }
+    try {
+      state.db.close();
+    } catch {
+      /* ignore */
+    }
   }
   if (state.appDb) {
-    try { state.appDb.close(); } catch { /* ignore */ }
+    try {
+      state.appDb.close();
+    } catch {
+      /* ignore */
+    }
   }
 }

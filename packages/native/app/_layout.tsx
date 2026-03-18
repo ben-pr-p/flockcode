@@ -38,6 +38,7 @@ export default function RootLayout() {
   // useGlobalSearchParams reads params from the currently focused child route,
   // since this root layout is a parent of all routes that define projectId.
   const params = useGlobalSearchParams<{ projectId?: string }>();
+  console.log({ params });
   const settings = useSettings();
 
   // Right drawer (projects) state
@@ -48,7 +49,7 @@ export default function RootLayout() {
       openRightDrawer: () => setRightDrawerOpen(true),
       closeRightDrawer: () => setRightDrawerOpen(false),
     }),
-    [],
+    []
   );
 
   // Alert the user if expo-updates rolled back due to a crash in a previous OTA update
@@ -57,8 +58,8 @@ export default function RootLayout() {
       Alert.alert(
         'Update Rolled Back',
         'The last OTA update crashed on launch and was automatically rolled back. ' +
-        'The app is running the previous working version. ' +
-        'Check the published update for errors before re-publishing.',
+          'The app is running the previous working version. ' +
+          'Check the published update for errors before re-publishing.'
       );
     }
   }, [settings.isEmergencyLaunch]);
@@ -95,16 +96,12 @@ export default function RootLayout() {
               selectedProjectId={params.projectId ?? null}
               onClose={() => setRightDrawerOpen(false)}
             />
-          )}
-        >
+          )}>
           <View style={{ flex: 1 }}>
             <Suspense>
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="(drawer)" />
-                <Stack.Screen
-                  name="settings"
-                  options={{ presentation: 'modal' }}
-                />
+                <Stack.Screen name="settings" options={{ presentation: 'modal' }} />
               </Stack>
             </Suspense>
           </View>

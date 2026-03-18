@@ -101,7 +101,7 @@ export function SettingsScreen({
         <View className="px-5 gap-3">
           {backends.map((backend, index) => (
             <BackendEntry
-              key={`${backend.url}-${index}`}
+              key={index}
               backend={backend}
               connection={connections[backend.url]}
               isEditing={editingIndex === index}
