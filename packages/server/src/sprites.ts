@@ -13,6 +13,44 @@ import { env } from "./env"
 
 export { ExecError }
 
+// ---------------------------------------------------------------------------
+// Service types
+// ---------------------------------------------------------------------------
+
+/** State of a running (or stopped) service on a Sprite. */
+export interface SpriteServiceState {
+  name: string
+  pid?: number
+  started_at?: string
+  status: string
+}
+
+/** A service registered on a Sprite. */
+export interface SpriteService {
+  name: string
+  cmd: string
+  args: string[]
+  http_port: number | null
+  needs: string[]
+  state: SpriteServiceState | null
+}
+
+/** Configuration for creating or updating a service via {@link SpriteClient.putService}. */
+export interface PutServiceConfig {
+  /** The command to run (e.g. `"opencode"`). */
+  cmd: string
+  /** Arguments to pass to the command. */
+  args?: string[]
+  /** HTTP port the service listens on (enables Sprite URL proxying). */
+  httpPort?: number
+  /** Names of other services this one depends on. */
+  needs?: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Client options
+// ---------------------------------------------------------------------------
+
 /** Options for creating a {@link SpriteClient}. */
 export interface SpriteClientOptions {
   /** Sprite name (e.g. "my-dev-sprite"). */
@@ -188,6 +226,81 @@ export class SpriteClient {
     const result = await this.exec("printenv HOME")
     this.#cachedHomeDir = result.trim()
     return this.#cachedHomeDir
+  }
+
+  // -------------------------------------------------------------------------
+  // Services API — manage background services on the Sprite
+  // -------------------------------------------------------------------------
+
+  /**
+   * List all registered services and their current state.
+   *
+   * Uses `GET /v1/sprites/{name}/services`.
+   */
+  async listServices(): Promise<SpriteService[]> {
+    const url = `${this.#baseURL}/v1/sprites/${encodeURIComponent(this.#spriteName)}/services`
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.#token}` },
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw new Error(`Failed to list services: ${res.status} ${text}`)
+    }
+    return (await res.json()) as SpriteService[]
+  }
+
+  /**
+   * Get a single service by name. Returns `null` if not found.
+   *
+   * Uses `GET /v1/sprites/{name}/services/{service_name}`.
+   */
+  async getService(serviceName: string): Promise<SpriteService | null> {
+    const url = `${this.#baseURL}/v1/sprites/${encodeURIComponent(this.#spriteName)}/services/${encodeURIComponent(serviceName)}`
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.#token}` },
+    })
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      throw new Error(`Failed to get service ${serviceName}: ${res.status} ${text}`)
+    }
+    return (await res.json()) as SpriteService
+  }
+
+  /**
+   * Create or update a service on the Sprite.
+   *
+   * Uses `PUT /v1/sprites/{name}/services/{service_name}`.
+   */
+  async putService(serviceName: string, config: PutServiceConfig): Promise<SpriteService | null> {
+    const url = `${this.#baseURL}/v1/sprites/${encodeURIComponent(this.#spriteName)}/services/${encodeURIComponent(serviceName)}`
+    const body: Record<string, unknown> = {
+      cmd: config.cmd,
+    }
+    if (config.args) body.args = config.args
+    if (config.httpPort != null) body.http_port = config.httpPort
+    if (config.needs) body.needs = config.needs
+
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${this.#token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+    const text = await res.text()
+    if (!res.ok) {
+      throw new Error(`Failed to put service ${serviceName}: ${res.status} ${text}`)
+    }
+    try {
+      return JSON.parse(text) as SpriteService
+    } catch {
+      // Some API versions may return empty or non-JSON bodies on success
+      return null
+    }
   }
 }
 

@@ -3,8 +3,10 @@
  * CLI entrypoint for the mobilecode tool.
  *
  * Usage:
- *   mobilecode start [--opencode-url <url>] [--port <port>]  — start the HTTP server
- *   mobilecode sync  [--opencode-url <url>] [--dry-run]      — sync projects to Fly Sprite
+ *   mobilecode start     [--opencode-url <url>] [--port <port>]         — start the HTTP server
+ *   mobilecode sync      [--opencode-url <url>] [--dry-run]             — sync projects to Fly Sprite
+ *   mobilecode configure-services [--dry-run]                            — register opencode-serve service on Sprite
+ *                        [--opencode-port <port>] [--opencode-dir <dir>]
  */
 
 import { parseArgs } from "util"
@@ -12,6 +14,7 @@ import { resolve } from "node:path"
 import { createClient } from "./opencode"
 import { createSpriteClientFromEnv } from "./sprites"
 import { sync } from "./sprite-sync"
+import { spawnServices } from "./sprite-configure-services"
 import { env } from "./env"
 
 const args = Bun.argv.slice(2)
@@ -75,6 +78,50 @@ if (subcommand === "start") {
   }
 
   process.exit(0)
+} else if (subcommand === "configure-services") {
+  // -------------------------------------------------------------------------
+  // Configure-services subcommand — register opencode-serve service, then exit
+  // -------------------------------------------------------------------------
+  const { values: csValues } = parseArgs({
+    args: args.slice(1),
+    options: {
+      "dry-run": { type: "boolean", default: false },
+      "opencode-port": { type: "string" },
+      "opencode-dir": { type: "string" },
+    },
+  })
+
+  const dryRun = csValues["dry-run"]!
+  const opencodePort = csValues["opencode-port"] ? Number(csValues["opencode-port"]) : undefined
+  const opencodeDir = csValues["opencode-dir"] ?? undefined
+
+  const sprite = createSpriteClientFromEnv()
+
+  if (dryRun) {
+    console.log("Dry run — no changes will be made.\n")
+  }
+
+  try {
+    const result = await spawnServices(sprite, {
+      dryRun,
+      opencodePort,
+      opencodeDir,
+    })
+
+    console.log("\n--- Summary ---")
+    if (result.serviceCreated) {
+      console.log(`Service:    opencode-serve created`)
+    } else if (result.serviceUpdated) {
+      console.log(`Service:    opencode-serve updated`)
+    } else if (result.serviceUnchanged) {
+      console.log(`Service:    opencode-serve unchanged`)
+    }
+  } catch (err: any) {
+    console.error("Configure-services failed:", err.message ?? err)
+    process.exit(1)
+  }
+
+  process.exit(0)
 } else {
   // -------------------------------------------------------------------------
   // No subcommand or unknown subcommand — print usage
@@ -82,16 +129,22 @@ if (subcommand === "start") {
   console.log(`mobilecode — mobile AI coding agent server
 
 Usage:
-  mobilecode start [options]   Start the HTTP server
-  mobilecode sync  [options]   Sync projects to Fly Sprite
+  mobilecode start     [options]   Start the HTTP server
+  mobilecode sync      [options]   Sync projects to Fly Sprite
+  mobilecode configure-services [options]   Register opencode-serve service on Sprite
 
 start options:
-  --opencode-url <url>   OpenCode server URL (default: $OPENCODE_URL or http://localhost:4096)
-  --port <port>          Server port (default: $PORT or 3000)
+  --opencode-url <url>       OpenCode server URL (default: $OPENCODE_URL or http://localhost:4096)
+  --port <port>              Server port (default: $PORT or 3000)
 
 sync options:
-  --opencode-url <url>   OpenCode server URL (default: $OPENCODE_URL or http://localhost:4096)
-  --dry-run              Show what would happen without making changes`)
+  --opencode-url <url>       OpenCode server URL (default: $OPENCODE_URL or http://localhost:4096)
+  --dry-run                  Show what would happen without making changes
+
+configure-services options:
+  --dry-run                  Show what would happen without making changes
+  --opencode-port <port>     Port for opencode serve on Sprite (default: 4096)
+  --opencode-dir <dir>       Working directory for opencode serve on Sprite`)
 
   if (subcommand) {
     console.error(`\nUnknown command: ${subcommand}`)
