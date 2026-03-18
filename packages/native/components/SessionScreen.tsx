@@ -53,6 +53,8 @@ interface SessionScreenProps {
   isMerging?: boolean
   /** Callback to trigger a merge. */
   onMerge?: () => void
+  /** Optional server selector element rendered below the worktree toggle (new sessions only). */
+  serverSelector?: React.ReactNode
 }
 
 export function SessionScreen({
@@ -82,6 +84,7 @@ export function SessionScreen({
   worktreeStatus,
   isMerging,
   onMerge,
+  serverSelector,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -112,6 +115,7 @@ export function SessionScreen({
         worktreeStatus={worktreeStatus}
         isMerging={isMerging}
         onMerge={onMerge}
+        backendUrl={backendUrl}
       />
 
       <TabBar activeTab={activeTab} onTabChange={onTabChange} onNewSession={handleNewSession} />
@@ -120,6 +124,7 @@ export function SessionScreen({
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-stone-400 dark:text-stone-600 text-sm text-center">{emptyMessage}</Text>
           {worktreeToggle}
+          {serverSelector}
         </View>
       ) : activeTab === 'session' ? (
         <ChatThread messages={messages} onToolCallPress={onToolCallPress} />

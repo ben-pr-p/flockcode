@@ -30,7 +30,9 @@ import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import type { ModelSelection, PendingCommand } from '../state/settings';
+import { Server, ChevronDown } from 'lucide-react-native';
 import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
+import { BackendSelectorSheet, type BackendOption } from './BackendSelectorSheet';
 
 /** Settings type shared by both wrappers. */
 export interface SessionSettings {
@@ -65,6 +67,8 @@ interface SessionViewProps {
   emptyMessage?: string;
   sessionModelInfo?: { modelID?: string; providerID?: string } | null;
   worktreeToggle?: React.ReactNode;
+  /** Optional server selector element rendered below the worktree toggle (new sessions only). */
+  serverSelector?: React.ReactNode;
 }
 
 /**
@@ -91,6 +95,7 @@ export function SessionView({
   sessionModelInfo,
   worktreeToggle,
   isNewSession,
+  serverSelector,
 }: SessionViewProps) {
   const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session');
   const [isSending, setIsSending] = useState(false);
@@ -399,6 +404,7 @@ export function SessionView({
         worktreeStatus={worktreeStatus}
         isMerging={isMerging}
         onMerge={handleMerge}
+        serverSelector={serverSelector}
       />
       {modelSheet}
       {agentCommandSheet}
@@ -608,8 +614,9 @@ interface NewSessionContentProps {
 
 /**
  * New-session wrapper.
- * Uses MergedStateQuery to find which backends have this project, picks the
- * first one, and wires send callbacks that create the session on that backend.
+ * Uses MergedStateQuery to find which backends have this project, then lets
+ * the user pick which server to create the session on via a selector.
+ * Connected backends are selectable; offline ones are shown but disabled.
  */
 export function NewSessionContent({
   projectId,
@@ -619,6 +626,8 @@ export function NewSessionContent({
   onSessionCreated,
   settings,
 }: NewSessionContentProps) {
+  const [selectedBackendUrl, setSelectedBackendUrl] = useState<BackendUrl | null>(null);
+
   return (
     <MergedStateQuery<ProjectValue>
       query={(db, q) =>
@@ -629,20 +638,56 @@ export function NewSessionContent({
       deps={[projectId]}
     >
       {({ data: projectResults, isLoading }) => {
-        const taggedProject = projectResults?.[0];
-        if (isLoading || !taggedProject) {
+        if (isLoading || !projectResults || projectResults.length === 0) {
           return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
         }
+
+        // Build a set of backend URLs that host this project
+        const backendUrlsWithProject = new Set(
+          projectResults.map((p) => p.backendUrl),
+        );
+
+        // Build BackendOption[] for all backends that host the project
+        const backendOptions: BackendOption[] = settings.backends
+          .filter((b) => b.enabled && backendUrlsWithProject.has(b.url))
+          .map((config) => ({
+            config,
+            connection: settings.connections[config.url],
+            hasProject: true,
+          }));
+
+        // Default to the first connected backend if no selection yet
+        const connectedOptions = backendOptions.filter(
+          (o) => o.connection?.status === 'connected',
+        );
+        const effectiveUrl =
+          selectedBackendUrl &&
+          connectedOptions.some((o) => o.config.url === selectedBackendUrl)
+            ? selectedBackendUrl
+            : connectedOptions[0]?.config.url ?? null;
+
+        if (!effectiveUrl) {
+          return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
+        }
+
+        // Look up the worktree from the matching project result
+        const matchingProject = projectResults.find(
+          (p) => p.backendUrl === effectiveUrl,
+        );
+
         return (
           <NewSessionDataLoader
             projectId={projectId}
-            backendUrl={taggedProject.backendUrl}
-            worktree={taggedProject.worktree}
+            backendUrl={effectiveUrl}
+            worktree={matchingProject?.worktree ?? ''}
             isTabletLandscape={isTabletLandscape}
             onMenuPress={onMenuPress}
             onProjectsPress={onProjectsPress}
             onSessionCreated={onSessionCreated}
             settings={settings}
+            backendOptions={backendOptions}
+            selectedBackendUrl={effectiveUrl}
+            onSelectBackend={setSelectedBackendUrl}
           />
         );
       }}
@@ -659,6 +704,9 @@ function NewSessionDataLoader({
   onProjectsPress,
   onSessionCreated,
   settings,
+  backendOptions,
+  selectedBackendUrl,
+  onSelectBackend,
 }: {
   projectId: string;
   backendUrl: BackendUrl;
@@ -668,11 +716,21 @@ function NewSessionDataLoader({
   onProjectsPress: () => void;
   onSessionCreated: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
   settings: SessionSettings;
+  backendOptions: BackendOption[];
+  selectedBackendUrl: BackendUrl;
+  onSelectBackend: (url: BackendUrl) => void;
 }) {
   const resources = useAtomValue(backendResourcesAtom);
   const api = resources[backendUrl]?.api;
   const creatingRef = useRef(false);
   const [useWorktree, setUseWorktree] = useState(false);
+  const [backendSelectorVisible, setBackendSelectorVisible] = useState(false);
+
+  // Find the display name for the currently selected backend
+  const selectedBackendName = useMemo(() => {
+    const opt = backendOptions.find((o) => o.config.url === selectedBackendUrl);
+    return opt?.config.name || 'Server';
+  }, [backendOptions, selectedBackendUrl]);
 
   const now = Date.now();
   const placeholderSession: SessionValue = {
@@ -733,34 +791,61 @@ function NewSessionDataLoader({
     [createAndPrompt]
   );
 
+  // Only show the server selector when there are multiple backends hosting this project
+  const showServerSelector = backendOptions.length > 1;
+
   return (
-    <SessionView
-      sessionId="new"
-      backendUrl={backendUrl}
-      session={placeholderSession}
-      serverMessages={[]}
-      changes={[]}
-      isTabletLandscape={isTabletLandscape}
-      onMenuPress={onMenuPress}
-      onProjectsPress={onProjectsPress}
-      settings={settings}
-      onSendText={handleSendText}
-      onSendAudio={handleSendAudio}
-      isNewSession
-      emptyMessage="Send a message to start a new session"
-      worktreeToggle={
-        <Pressable
-          onPress={() => setUseWorktree((v) => !v)}
-          className="mt-4 flex-row items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 dark:bg-stone-900">
-          <View
-            className={`h-4 w-4 rounded border ${
-              useWorktree ? 'border-blue-500 bg-blue-500' : 'border-stone-400 dark:border-stone-600'
-            }`}
-          />
-          <Text className="text-sm text-stone-500 dark:text-stone-400">Run in worktree</Text>
-        </Pressable>
-      }
-    />
+    <>
+      <SessionView
+        sessionId="new"
+        backendUrl={backendUrl}
+        session={placeholderSession}
+        serverMessages={[]}
+        changes={[]}
+        isTabletLandscape={isTabletLandscape}
+        onMenuPress={onMenuPress}
+        onProjectsPress={onProjectsPress}
+        settings={settings}
+        onSendText={handleSendText}
+        onSendAudio={handleSendAudio}
+        isNewSession
+        emptyMessage="Send a message to start a new session"
+        worktreeToggle={
+          <Pressable
+            onPress={() => setUseWorktree((v) => !v)}
+            className="mt-4 flex-row items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 dark:bg-stone-900">
+            <View
+              className={`h-4 w-4 rounded border ${
+                useWorktree ? 'border-blue-500 bg-blue-500' : 'border-stone-400 dark:border-stone-600'
+              }`}
+            />
+            <Text className="text-sm text-stone-500 dark:text-stone-400">Run in worktree</Text>
+          </Pressable>
+        }
+        serverSelector={
+          showServerSelector ? (
+            <Pressable
+              onPress={() => setBackendSelectorVisible(true)}
+              className="mt-2 flex-row items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 dark:bg-stone-900">
+              <Server size={14} color="#A8A29E" />
+              <Text className="text-sm text-stone-500 dark:text-stone-400">
+                {selectedBackendName}
+              </Text>
+              <ChevronDown size={12} color="#A8A29E" />
+            </Pressable>
+          ) : undefined
+        }
+      />
+      {showServerSelector && (
+        <BackendSelectorSheet
+          visible={backendSelectorVisible}
+          onClose={() => setBackendSelectorVisible(false)}
+          options={backendOptions}
+          selectedUrl={selectedBackendUrl}
+          onSelect={onSelectBackend}
+        />
+      )}
+    </>
   );
 }
 

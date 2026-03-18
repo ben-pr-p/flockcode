@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
-import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin, Archive, ArchiveRestore, CircleDot, Check } from 'lucide-react-native';
+import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, ChevronDown, GitBranch, Pin, Archive, ArchiveRestore, CircleDot, Check, Monitor, Cloud } from 'lucide-react-native';
 import { useAtom, useAtomValue } from 'jotai/react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
@@ -14,7 +14,7 @@ import type { Message as ServerMessage } from '../../server/src/types';
 import { MergedStateQuery, MergedAppStateQuery, type WithBackendUrl } from '../lib/merged-query';
 import { backendResourcesAtom } from '../lib/backend-streams';
 import { pinnedSessionIdsAtom, pinnedProjectIdsAtom } from '../state/ui';
-import type { BackendUrl } from '../state/backends';
+import { backendsAtom, type BackendUrl, type BackendType } from '../state/backends';
 import type { ApiClient } from '../lib/api';
 
 interface SessionsSidebarProps {
@@ -265,9 +265,11 @@ interface SessionRowProps {
   isExpanded?: boolean;
   onToggleExpand?: () => void;
   isSubSession?: boolean;
+  /** Backend type for this session's server (shown as Monitor/Cloud icon when multiple backends exist). */
+  backendType?: BackendType;
 }
 
-function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStatus, agentName, onPress, onOverflow, onTogglePin, onArchive, isArchived, hasChildren, isExpanded, onToggleExpand, isSubSession }: SessionRowProps) {
+function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStatus, agentName, onPress, onOverflow, onTogglePin, onArchive, isArchived, hasChildren, isExpanded, onToggleExpand, isSubSession, backendType }: SessionRowProps) {
   const { colorScheme } = useColorScheme();
   const overflowColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const chevronColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
@@ -339,6 +341,11 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
               style={{ fontFamily: 'JetBrains Mono' }}>
               {formatRelativeTime(session.time.updated)}
             </Text>
+            {backendType && (
+              backendType === 'local'
+                ? <Monitor size={11} color={colorScheme === 'dark' ? '#57534E' : '#A8A29E'} />
+                : <Cloud size={11} color={colorScheme === 'dark' ? '#57534E' : '#A8A29E'} />
+            )}
             {agentName && (
               <View className="px-1.5 py-0.5 rounded bg-stone-200 dark:bg-stone-800">
                 <Text
@@ -406,6 +413,18 @@ function SessionListContent({
   const getApi = useCallback((backendUrl: BackendUrl): ApiClient | null => {
     return resources[backendUrl]?.api ?? null;
   }, [resources]);
+
+  // Backend type lookup — used to show Monitor/Cloud icon in session rows
+  const backends = useAtomValue(backendsAtom);
+  const resolvedBackends = backends instanceof Promise ? [] : backends;
+  const hasMultipleBackends = resolvedBackends.filter(b => b.enabled).length > 1;
+  const backendTypeMap = useMemo(() => {
+    const map = new Map<BackendUrl, BackendType>();
+    for (const b of resolvedBackends) {
+      map.set(b.url, b.type);
+    }
+    return map;
+  }, [resolvedBackends]);
 
 
   const router = useRouter();
@@ -770,6 +789,7 @@ function SessionListContent({
                   onPress={onSelectSession}
                   onOverflow={handleOverflow}
                   onTogglePin={togglePin}
+                  backendType={hasMultipleBackends ? backendTypeMap.get(node.session.backendUrl) : undefined}
                 />
               ))}
             </View>
@@ -798,6 +818,7 @@ function SessionListContent({
               hasChildren={node.children.length > 0}
               isExpanded={expandedParents.has(node.session.id)}
               onToggleExpand={() => toggleExpand(node.session.id)}
+              backendType={hasMultipleBackends ? backendTypeMap.get(node.session.backendUrl) : undefined}
             />
             {expandedParents.has(node.session.id) &&
               node.children.map((child) => (
@@ -814,6 +835,7 @@ function SessionListContent({
                   onTogglePin={togglePin}
                   onArchive={archiveSession}
                   isSubSession
+                  backendType={hasMultipleBackends ? backendTypeMap.get(child.backendUrl) : undefined}
                 />
               ))}
           </React.Fragment>
@@ -854,6 +876,7 @@ function SessionListContent({
                   hasChildren={node.children.length > 0}
                   isExpanded={expandedParents.has(node.session.id)}
                   onToggleExpand={() => toggleExpand(node.session.id)}
+                  backendType={hasMultipleBackends ? backendTypeMap.get(node.session.backendUrl) : undefined}
                 />
                 {expandedParents.has(node.session.id) &&
                   node.children.map((child) => (
@@ -871,6 +894,7 @@ function SessionListContent({
                       onArchive={unarchiveSession}
                       isArchived
                       isSubSession
+                      backendType={hasMultipleBackends ? backendTypeMap.get(child.backendUrl) : undefined}
                     />
                   ))}
               </React.Fragment>

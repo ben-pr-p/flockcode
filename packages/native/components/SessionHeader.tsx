@@ -5,6 +5,7 @@ import { useColorScheme } from 'nativewind'
 import { useAtomValue } from 'jotai'
 import { connectionInfoAtom } from '../state/settings'
 import { backendsAtom, backendConnectionsAtom } from '../state/backends'
+import type { BackendUrl } from '../state/backends'
 import type { WorktreeStatusValue } from '../lib/stream-db'
 
 interface SessionHeaderProps {
@@ -19,6 +20,8 @@ interface SessionHeaderProps {
   isMerging?: boolean
   /** Callback to trigger a merge. */
   onMerge?: () => void
+  /** The backend URL for this session. When provided, the server name is shown in the info bar. */
+  backendUrl?: BackendUrl
 }
 
 /** Session header with project name, session info, and optional worktree status. */
@@ -31,6 +34,7 @@ export function SessionHeader({
   worktreeStatus,
   isMerging,
   onMerge,
+  backendUrl,
 }: SessionHeaderProps) {
   const { colorScheme } = useColorScheme()
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C'
@@ -42,6 +46,11 @@ export function SessionHeader({
   const hasMultipleBackends = resolvedBackends.filter(b => b.enabled).length > 1
 
   const isWorktree = worktreeStatus?.isWorktreeSession && !worktreeStatus.error
+
+  // Derive the server name for the info bar (only shown when multiple backends)
+  const serverName = hasMultipleBackends && backendUrl
+    ? resolvedBackends.find(b => b.url === backendUrl)?.name ?? null
+    : null
 
   return (
     <View>
@@ -103,6 +112,12 @@ export function SessionHeader({
             </Text>
             <Text className="text-xs text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>·</Text>
             <Text className="text-xs text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>{relativeTime}</Text>
+            {serverName && (
+              <>
+                <Text className="text-xs text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>·</Text>
+                <Text className="text-xs text-stone-400 dark:text-stone-600" style={{ fontFamily: 'JetBrains Mono' }}>{serverName}</Text>
+              </>
+            )}
           </View>
 
           {isWorktree && (
