@@ -6,8 +6,8 @@ import { Menu, Plus, Search, Ellipsis, Settings, Mic, HelpCircle, ChevronRight, 
 import { useAtom, useAtomValue } from 'jotai/react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
-import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing } from 'react-native-reanimated';
-import Swipeable from 'react-native-gesture-handler/Swipeable';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, interpolate, Easing, type SharedValue } from 'react-native-reanimated';
+import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import type { SessionValue, SessionMetaValue, WorktreeStatusValue, ProjectValue } from '../lib/stream-db';
 import type { Message as ServerMessage } from '../../server/src/types';
@@ -269,42 +269,73 @@ interface SessionRowProps {
   backendType?: BackendType;
 }
 
+// Threshold in px past which the swipe commits the archive action.
+const ARCHIVE_SWIPE_THRESHOLD = 100;
+
+/** Animated right-action panel revealed behind a session row during swipe. */
+function ArchiveSwipeAction({ drag, isArchived }: { drag: SharedValue<number>; isArchived: boolean }) {
+  // The icon scales up once the user drags past the threshold to confirm the action.
+  const iconStyle = useAnimatedStyle(() => {
+    const scale = interpolate(
+      Math.abs(drag.value),
+      [0, ARCHIVE_SWIPE_THRESHOLD * 0.8, ARCHIVE_SWIPE_THRESHOLD],
+      [0.8, 1, 1.2],
+      'clamp',
+    );
+    return { transform: [{ scale }] };
+  });
+
+  return (
+    <View className="flex-1 items-center justify-center rounded-lg bg-amber-600">
+      <Animated.View style={iconStyle}>
+        {isArchived ? (
+          <ArchiveRestore size={18} color="#FFFFFF" />
+        ) : (
+          <Archive size={18} color="#FFFFFF" />
+        )}
+      </Animated.View>
+      <Text className="mt-1 text-[10px] font-medium text-white"
+        style={{ fontFamily: 'JetBrains Mono' }}>
+        {isArchived ? 'Unarchive' : 'Archive'}
+      </Text>
+    </View>
+  );
+}
+
 function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStatus, agentName, onPress, onOverflow, onTogglePin, onArchive, isArchived, hasChildren, isExpanded, onToggleExpand, isSubSession, backendType }: SessionRowProps) {
   const { colorScheme } = useColorScheme();
   const overflowColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const chevronColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const subSessionIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const pinColor = colorScheme === 'dark' ? '#D97706' : '#B45309';
-  const swipeableRef = useRef<Swipeable>(null);
+  const swipeableRef = useRef<SwipeableMethods>(null);
 
   const handleLongPress = useCallback(() => {
     onTogglePin(session.id);
   }, [session.id, onTogglePin]);
 
-  const renderRightActions = useCallback(() => (
-    <Pressable
-      onPress={() => {
-        onArchive?.(session.id, session.backendUrl);
-        swipeableRef.current?.close();
-      }}
-      className="items-center justify-center rounded-lg bg-amber-600 px-4">
-      {isArchived ? (
-        <ArchiveRestore size={18} color="#FFFFFF" />
-      ) : (
-        <Archive size={18} color="#FFFFFF" />
-      )}
-      <Text className="mt-1 text-[10px] font-medium text-white"
-        style={{ fontFamily: 'JetBrains Mono' }}>
-        {isArchived ? 'Unarchive' : 'Archive'}
-      </Text>
-    </Pressable>
-  ), [session.id, session.backendUrl, isArchived, onArchive]);
+  const renderRightActions = useCallback(
+    (_progress: SharedValue<number>, drag: SharedValue<number>) => (
+      <ArchiveSwipeAction drag={drag} isArchived={!!isArchived} />
+    ),
+    [isArchived],
+  );
+
+  const handleSwipeOpen = useCallback((direction: 'left' | 'right') => {
+    if (direction === 'right') {
+      onArchive?.(session.id, session.backendUrl);
+      swipeableRef.current?.close();
+    }
+  }, [session.id, session.backendUrl, onArchive]);
 
   return (
-    <Swipeable
+    <ReanimatedSwipeable
       ref={swipeableRef}
       renderRightActions={onArchive ? renderRightActions : undefined}
-      overshootRight={false}>
+      onSwipeableOpen={onArchive ? handleSwipeOpen : undefined}
+      rightThreshold={ARCHIVE_SWIPE_THRESHOLD}
+      friction={1.5}
+      overshootFriction={4}>
       <Pressable
         onPress={() => onPress(session.id, session.projectID, session.backendUrl)}
         onLongPress={handleLongPress}
@@ -364,7 +395,7 @@ function SessionRow({ session, isSelected, isPinned, sessionStatus, worktreeStat
           </Pressable>
         )}
       </Pressable>
-    </Swipeable>
+    </ReanimatedSwipeable>
   );
 }
 
