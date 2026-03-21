@@ -1,8 +1,8 @@
 import { Hono } from "hono"
 import { DurableStreamServer } from "durable-streams-web-standard"
 import { FileBackedStreamStore } from "@durable-streams/server"
-import { join, basename, resolve } from "node:path"
-import { homedir } from "node:os"
+import { basename, resolve } from "node:path"
+import { dataDir } from "@crustjs/store"
 import { customAlphabet } from "nanoid"
 import { z } from "zod/v4"
 import { zValidator } from "@hono/zod-validator"
@@ -45,8 +45,8 @@ export async function createApp(opencodeUrl: string) {
   const instanceId = generateInstanceId()
 
   // Persistent app state stream — survives server restarts
-  const dataDir = join(homedir(), ".local", "share", "flockcode")
-  const appStore = new FileBackedStreamStore({ dataDir })
+  const appDataDir = dataDir("flockcode")
+  const appStore = new FileBackedStreamStore({ dataDir: appDataDir })
   const appDs = new DurableStreamServer({ store: appStore })
   await appDs.createStream("/", { contentType: "application/json" })
 

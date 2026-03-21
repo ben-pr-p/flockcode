@@ -1,5 +1,5 @@
 {
-  "name": "@flockcode/server",
+  "name": "@bprp/flockcode",
   "version": "0.0.1",
   "bin": {
     "flockcode": "./src/index.ts"
@@ -19,6 +19,10 @@
     "build:diff-page": "bun build src/diff-page/index.html --outdir=src/diff-page/dist --minify"
   },
   "dependencies": {
+    "@crustjs/core": "^0.0.15",
+    "@crustjs/plugins": "^0.0.19",
+    "@crustjs/store": "^0.0.4",
+    "@crustjs/validate": "^0.0.13",
     "@durable-streams/server": "0.2.1",
     "@fly/sprites": "^0.0.1",
     "@hono/zod-validator": "^0.7.6",

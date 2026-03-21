@@ -11,12 +11,16 @@
       },
     },
     "packages/server": {
-      "name": "@flockcode/server",
+      "name": "@bprp/flockcode",
       "version": "0.0.1",
       "bin": {
         "flockcode": "./src/index.ts",
       },
       "dependencies": {
+        "@crustjs/core": "^0.0.15",
+        "@crustjs/plugins": "^0.0.19",
+        "@crustjs/store": "^0.0.4",
+        "@crustjs/validate": "^0.0.13",
         "@durable-streams/server": "0.2.1",
         "@fly/sprites": "^0.0.1",
         "@hono/zod-validator": "^0.7.6",
@@ -38,13 +42,23 @@
     },
   },
   "packages": {
+    "@bprp/flockcode": ["@bprp/flockcode@workspace:packages/server"],
+
+    "@crustjs/core": ["@crustjs/core@0.0.15", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-dgR1hSNj202a3IUfdj2S7QEG6Wd/2v24aq0Iz45NGTQxxNbBs6j2ENQSJTZeYkaeXjj+hnNrIZ1PiLnHuDxYaA=="],
+
+    "@crustjs/plugins": ["@crustjs/plugins@0.0.19", "", { "dependencies": { "@crustjs/style": "0.0.5" }, "peerDependencies": { "@crustjs/core": "0.0.15", "typescript": "^5" } }, "sha512-z7riDW7q89Oa8YKaLTHvTSgSyLsATMlK1WZ3huhH6w9TvgO+a5AVCOgi7tqi0NDv0D0Bq1wj7Jj/qhnvccyaMQ=="],
+
+    "@crustjs/store": ["@crustjs/store@0.0.4", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-pfYuykVBH08HKBpycPcBZrk4CSQMVhccENDANbJoGXX86YjZk5urjzaJGeGXR1S4DVCt6hGC15aiRf6SEbpyag=="],
+
+    "@crustjs/style": ["@crustjs/style@0.0.5", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-KZhxi2iCMYEMihMDmOrHkC4gl5INtogR9AEfbOkjwot74cmNQ2vTUfiZsLmWzBQ23nhPQ0vBwZBNFN+IpH+F0w=="],
+
+    "@crustjs/validate": ["@crustjs/validate@0.0.13", "", { "dependencies": { "@standard-schema/spec": "^1.1.0" }, "peerDependencies": { "@crustjs/core": "0.0.15", "effect": "^3.19.0", "typescript": "^5", "zod": "^4.0.0" }, "optionalPeers": ["effect", "zod"] }, "sha512-Z8oXll4FxP8/sGCH6k4S/Dsrdj6kTPQgfJlte6PFn+UgDzCnePYPHfEqvOr4CFUSi2XE9xl6QhEC+Aw/IQhGjQ=="],
+
     "@durable-streams/client": ["@durable-streams/client@0.2.2", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1", "fastq": "^1.19.1" }, "bin": { "intent": "bin/intent.js" } }, "sha512-zmr9ErxJP1ORljnog4kclWmEJGoTpGN+Mu8FJLVEgcaR9PqTeyKtadq1l1H+DhrPsfAPeG6BF/mEJs4HyI+Eig=="],
 
     "@durable-streams/server": ["@durable-streams/server@0.2.1", "", { "dependencies": { "@durable-streams/client": "0.2.1", "@durable-streams/state": "0.2.1", "@neophi/sieve-cache": "^1.0.0", "lmdb": "^3.3.0" } }, "sha512-34Ss6CJIJJk0i8Leo9hhNqfbiAAfthSBWiYb13wYu4Wn72vJHorrCKH5Qr0stzZR7jp+fjdbZEnim4lExxEOjg=="],
 
     "@durable-streams/state": ["@durable-streams/state@0.2.1", "", { "dependencies": { "@durable-streams/client": "0.2.1", "@standard-schema/spec": "^1.0.0" }, "peerDependencies": { "@tanstack/db": ">=0.5.0" } }, "sha512-8piCcw/y1Jz6QJn0vOf+yhovFlp3xvRbzWRWtF51ndlorofJi3pOfCXnEINuvSueuNMIJosmKOg0AEvpMKfoCw=="],
-
-    "@flockcode/server": ["@flockcode/server@workspace:packages/server"],
 
     "@fly/sprites": ["@fly/sprites@0.0.1", "", {}, "sha512-1s+dIVi/pTMP4Aj4Mkg+4LoZ/+a0Kp6l9piPRxvpgEKm11b/eRiZgJwVytwAHeI/vtg2fuwcFExjtXOEfny/TA=="],
 

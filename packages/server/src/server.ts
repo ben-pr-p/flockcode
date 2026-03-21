@@ -1,39 +1,15 @@
 #!/usr/bin/env bun
 /**
- * Bun HTTP server entrypoint. This module is spawned by the CLI `start`
- * subcommand and exports the default Bun server config.
+ * Standalone Bun HTTP server entrypoint for `bun run dev` / `bun run start`.
  *
- * CLI flags override environment variables (validated by {@link env}).
- *
- * Usage:
- *   bun src/server.ts [--opencode-url <url>] [--port <port>]
+ * Reads configuration from environment variables only (no CLI arg parsing).
+ * The CLI entrypoint (`index.ts`) calls {@link startServer} directly.
  */
 
-import { parseArgs } from "util"
-import { createApp } from "./app"
+import { startServer } from "./start-server"
 import { env } from "./env"
-import diffPage from "./diff-page/index.html"
 
-const { values } = parseArgs({
-  args: Bun.argv.slice(2),
-  options: {
-    "opencode-url": { type: "string" },
-    port: { type: "string" },
-  },
+export const { app, ds, appDs, stateStream, instanceId, server } = await startServer({
+  opencodeUrl: env.OPENCODE_URL,
+  port: env.PORT,
 })
-
-const opencodeUrl = values["opencode-url"] ?? env.OPENCODE_URL
-const port = values.port ? parseInt(values.port, 10) : env.PORT
-
-export const { app, ds, appDs, stateStream, instanceId } = await createApp(opencodeUrl)
-
-console.log(`Server starting on port ${port} (opencode: ${opencodeUrl})`)
-
-export default {
-  port,
-  idleTimeout: 255, // seconds — must exceed durable streams long-poll timeout (30s)
-  routes: {
-    "/diff": diffPage,
-  },
-  fetch: app.fetch,
-}
