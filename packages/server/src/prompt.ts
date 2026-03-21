@@ -5,6 +5,14 @@ import { mapMessage } from "./opencode"
 import { transcribeAudio } from "./transcribe"
 import type { Message, PromptPartInput } from "./types"
 
+/** Line reference from the diff viewer — the user selected these lines before sending. */
+interface LineReference {
+  file: string
+  startLine: number
+  endLine: number
+  side?: "additions" | "deletions"
+}
+
 export async function sendPrompt(
   client: OpencodeClient,
   sessionId: string,
@@ -12,6 +20,7 @@ export async function sendPrompt(
   directory?: string,
   model?: { providerID: string; modelID: string },
   agent?: string,
+  lineReference?: LineReference,
 ): Promise<void> {
   // Fetch conversation context for audio transcription
   let conversationContext: Message[] | undefined
@@ -47,6 +56,16 @@ export async function sendPrompt(
       return { type: "text" as const, text: p.text }
     }),
   )
+
+  // Prepend line reference context if the user selected lines in the diff viewer
+  if (lineReference && textParts.length > 0) {
+    const lineRange = lineReference.startLine === lineReference.endLine
+      ? `line ${lineReference.startLine}`
+      : `lines ${lineReference.startLine}-${lineReference.endLine}`
+    const sideQualifier = lineReference.side ? ` (${lineReference.side} side)` : ""
+    const prefix = `[The user is referencing ${lineRange} of ${lineReference.file}${sideQualifier}]\n\n`
+    textParts[0] = { type: "text", text: prefix + textParts[0].text }
+  }
 
   const resolvedText = textParts.map((p) => p.text.slice(0, 100)).join(" | ")
   console.log(`[prompt] session=${sessionId} forwarding to opencode: ${textParts.length} part(s), text preview: "${resolvedText.slice(0, 200)}"`)

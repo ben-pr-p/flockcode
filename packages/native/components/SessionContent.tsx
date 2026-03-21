@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { eq } from '@tanstack/react-db';
 import { SessionScreen } from './SessionScreen';
 import { SplitLayout } from './SplitLayout';
@@ -30,6 +30,7 @@ import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import type { ModelSelection, PendingCommand } from '../state/settings';
+import { lineSelectionAtom, type LineSelection } from '../state/line-selection';
 import { Server, ChevronDown } from 'lucide-react-native';
 import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
 import { BackendSelectorSheet, type BackendOption } from './BackendSelectorSheet';
@@ -482,6 +483,12 @@ function ExistingSessionDataLoader({
   const resources = useAtomValue(backendResourcesAtom);
   const api = resources[backendUrl]?.api;
 
+  // Line selection — read current value via ref so memoized callbacks stay stable
+  const lineSelection = useAtomValue(lineSelectionAtom);
+  const setLineSelection = useSetAtom(lineSelectionAtom);
+  const lineSelectionRef = useRef<LineSelection | null>(lineSelection);
+  lineSelectionRef.current = lineSelection;
+
   const { data: rawMessages } = useBackendStateQuery<ServerMessage>(
     backendUrl,
     (db, q) =>
@@ -525,35 +532,45 @@ function ExistingSessionDataLoader({
   const handleSendText = useCallback(
     async (text: string, model: ModelSelection | null, agent?: string) => {
       if (!api) return;
+      const currentSelection = lineSelectionRef.current;
       const res = await api.api.sessions[':sessionId'].prompt.$post({
         param: { sessionId },
         json: {
           parts: [{ type: 'text' as const, text }],
           ...(model ? { model } : {}),
           ...(agent ? { agent } : {}),
+          ...(currentSelection ? { lineReference: currentSelection } : {}),
         },
       });
       if (!res.ok) throw new Error('Prompt failed');
+      // Clear line selection after successful send
+      if (currentSelection) setLineSelection(null);
     },
-    [api, sessionId]
+    [api, sessionId, setLineSelection]
   );
 
   const handleSendAudio = useCallback(
     (base64: string, mimeType: string, model: ModelSelection | null) => {
       if (!api) return;
+      const currentSelection = lineSelectionRef.current;
       api.api.sessions[':sessionId'].prompt
         .$post({
           param: { sessionId },
           json: {
             parts: [{ type: 'audio' as const, audioData: base64, mimeType }],
             ...(model ? { model } : {}),
+            ...(currentSelection ? { lineReference: currentSelection } : {}),
           },
+        })
+        .then(() => {
+          // Clear line selection after successful send
+          if (currentSelection) setLineSelection(null);
         })
         .catch((err) => {
           console.error('[SessionContent] audio prompt failed:', err);
         });
     },
-    [api, sessionId]
+    [api, sessionId, setLineSelection]
   );
 
   const handleExecuteCommand = useCallback(

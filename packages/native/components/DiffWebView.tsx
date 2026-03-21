@@ -1,13 +1,14 @@
 import React, { useCallback, useRef, useEffect, useState, useMemo } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { WebView, type WebViewMessageEvent } from 'react-native-webview'
-import { useAtomValue } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { eq } from '@tanstack/react-db'
 import { useColorScheme } from 'nativewind'
 import type { BackendUrl } from '../state/backends'
 import { backendResourcesAtom } from '../lib/backend-streams'
 import { useBackendStateQuery } from '../lib/merged-query'
 import type { ChangeValue } from '../lib/stream-db'
+import { lineSelectionAtom } from '../state/line-selection'
 import diffViewerHtml from '../assets/diff-viewer'
 
 interface DiffWebViewProps {
@@ -34,6 +35,11 @@ export function DiffWebView({ sessionId, backendUrl, activeFile }: DiffWebViewPr
   const [diffs, setDiffs] = useState<Array<{ file: string; before: string; after: string }> | null>(
     null
   )
+
+  // Line selection — write to atom when WebView reports selection, clear WebView when atom goes null
+  const setLineSelection = useSetAtom(lineSelectionAtom)
+  const lineSelection = useAtomValue(lineSelectionAtom)
+  const prevLineSelectionRef = useRef(lineSelection)
 
   // Watch changes from the stream to know when to refetch diffs
   const { data: changeResults } = useBackendStateQuery<ChangeValue>(
@@ -92,6 +98,16 @@ export function DiffWebView({ sessionId, backendUrl, activeFile }: DiffWebViewPr
     })}; true;`
   }, [diffs, colorScheme])
 
+  // When the atom is externally cleared (e.g. after send or user taps X), tell the WebView
+  useEffect(() => {
+    const prev = prevLineSelectionRef.current
+    prevLineSelectionRef.current = lineSelection
+    // Only send clearSelection when transitioning from non-null to null
+    if (prev !== null && lineSelection === null && isLoaded) {
+      sendMessage({ type: 'clearSelection' })
+    }
+  }, [lineSelection, isLoaded, sendMessage])
+
   // Sync color scheme changes to the WebView
   useEffect(() => {
     if (!isLoaded) return
@@ -121,11 +137,22 @@ export function DiffWebView({ sessionId, backendUrl, activeFile }: DiffWebViewPr
           webViewRef.current?.injectJavaScript(js)
           pendingFileRef.current = null
         }
+      } else if (data.type === 'lineSelection') {
+        if (data.range) {
+          setLineSelection({
+            file: data.file,
+            startLine: data.range.start,
+            endLine: data.range.end,
+            side: data.range.side ?? data.range.endSide,
+          })
+        } else {
+          setLineSelection(null)
+        }
       }
     } catch {
       // ignore
     }
-  }, [])
+  }, [setLineSelection])
 
   return (
     <View style={styles.container}>

@@ -30,6 +30,13 @@ const PromptPartsSchema = z.object({
     modelID: z.string(),
   }).optional(),
   agent: z.string().optional(),
+  /** Optional line reference from the diff viewer — the user selected these lines before sending. */
+  lineReference: z.object({
+    file: z.string(),
+    startLine: z.number(),
+    endLine: z.number(),
+    side: z.enum(["additions", "deletions"]).optional(),
+  }).optional(),
 })
 
 // Extended schema for session creation — adds optional worktree flag
@@ -145,12 +152,12 @@ export async function createApp(opencodeUrl: string) {
       zValidator("json", PromptPartsSchema),
       async (c) => {
         const sessionId = c.req.param("sessionId")
-        const { parts, model, agent } = c.req.valid("json")
+        const { parts, model, agent, lineReference } = c.req.valid("json")
         try {
           // Look up the session to get its directory
           const sessionRes = await client.session.get({ path: { id: sessionId } })
           const directory = (sessionRes.data as any)?.directory as string | undefined
-          await sendPrompt(client, sessionId, parts, directory, model, agent)
+          await sendPrompt(client, sessionId, parts, directory, model, agent, lineReference)
           return c.json({ success: true })
         } catch (err: any) {
           console.error("[POST /api/sessions/:sessionId/prompt]", err)

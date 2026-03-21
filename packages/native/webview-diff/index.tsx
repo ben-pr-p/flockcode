@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MultiFileDiff } from '@pierre/diffs/react'
+import type { SelectedLineRange } from '@pierre/diffs'
 
 declare global {
   interface Window {
@@ -31,6 +32,17 @@ const STONE_CSS = `
     --diffs-dark-bg: #0C0A09 !important;
     --diffs-font-family: 'JetBrains Mono', monospace;
   }
+  /* Widen line number gutter for touch-friendly tap targets.
+     touch-action: none prevents the browser from starting a scroll/pan
+     gesture when the touch begins on a line number, so taps and drags
+     on the gutter always trigger line selection instead of scrolling. */
+  [data-column-number] {
+    min-width: 44px !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    touch-action: none;
+  }
+
 `
 
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']
@@ -169,24 +181,198 @@ function ImageDiff({
   )
 }
 
+/**
+ * Custom touch-based line selection for mobile/iPad.
+ *
+ * The @pierre/diffs library's built-in enableLineSelection uses pointer events
+ * with document-level pointermove listeners, which don't work reliably on iOS
+ * WebKit during touch drags. Instead, we disable the library's selection and
+ * implement our own using touch events at the document level (where iOS WebKit
+ * reliably delivers them). We probe into shadow DOMs via elementFromPoint to
+ * find line numbers. We still use the library's `selectedLines` controlled
+ * prop to render the highlight — we just drive it ourselves.
+ *
+ * Gesture: tap a line number to select one line, drag across line numbers to
+ * select a range. Tap a selected single line to deselect.
+ */
+
+// Module-level touch selection state, shared across all FileDiffPanel instances.
+// Only one selection can be active at a time.
+let _selectionCallback: ((range: SelectedLineRange | null) => void) | null = null
+let _selectionRef: SelectedLineRange | null = null
+let _anchor: { lineNumber: number; side: 'additions' | 'deletions' } | null = null
+let _isDragging = false
+let _activeShadow: ShadowRoot | null = null
+
+function _getLineInfoAtPoint(shadow: ShadowRoot, x: number, y: number) {
+  const el = shadow.elementFromPoint(x, y) as HTMLElement | null
+  if (!el) return null
+
+  // Walk up to find the [data-line] row
+  let lineEl: HTMLElement | null = null
+  let current: HTMLElement | null = el
+  while (current && current !== (shadow as any).host) {
+    if (current.hasAttribute('data-line')) {
+      lineEl = current
+      break
+    }
+    current = current.parentElement
+  }
+  if (!lineEl) return null
+
+  const lineNumber = parseInt(lineEl.dataset.line ?? '', 10)
+  if (isNaN(lineNumber)) return null
+
+  let side: 'additions' | 'deletions' = 'additions'
+  if (lineEl.dataset.lineType === 'change-deletion') side = 'deletions'
+
+  return { lineNumber, side }
+}
+
+function _isNumberColumnAtPoint(shadow: ShadowRoot, x: number, y: number): boolean {
+  const el = shadow.elementFromPoint(x, y) as HTMLElement | null
+  if (!el) return false
+
+  let cur: HTMLElement | null = el
+  while (cur && cur !== (shadow as any).host) {
+    if (cur.hasAttribute('data-column-number')) return true
+    if (cur.hasAttribute('data-line')) break
+    cur = cur.parentElement
+  }
+  return false
+}
+
+function _findShadowRootAtPoint(x: number, y: number): ShadowRoot | null {
+  // document.elementFromPoint returns the host element of the shadow DOM
+  let el = document.elementFromPoint(x, y) as HTMLElement | null
+  while (el) {
+    if (el.shadowRoot) return el.shadowRoot
+    el = el.parentElement
+  }
+  return null
+}
+
+// Install document-level touch handlers once
+let _touchHandlersInstalled = false
+function _installTouchHandlers() {
+  if (_touchHandlersInstalled) return
+  _touchHandlersInstalled = true
+
+  document.addEventListener('touchstart', (e: TouchEvent) => {
+    const touch = e.touches[0]
+    if (!touch) return
+
+    const shadow = _findShadowRootAtPoint(touch.clientX, touch.clientY)
+    if (!shadow) return
+
+    if (!_isNumberColumnAtPoint(shadow, touch.clientX, touch.clientY)) return
+
+    const info = _getLineInfoAtPoint(shadow, touch.clientX, touch.clientY)
+    if (!info || !_selectionCallback) return
+
+    // Prevent scrolling when touching line numbers
+    e.preventDefault()
+
+    // Tap on already-selected single line → deselect
+    if (_selectionRef && _selectionRef.start === info.lineNumber && _selectionRef.end === info.lineNumber) {
+      _selectionRef = null
+      _selectionCallback(null)
+      return
+    }
+
+    _anchor = info
+    _isDragging = true
+    _activeShadow = shadow
+    const range: SelectedLineRange = {
+      start: info.lineNumber,
+      end: info.lineNumber,
+      side: info.side,
+    }
+    _selectionRef = range
+    _selectionCallback(range)
+  }, { passive: false })
+
+  document.addEventListener('touchmove', (e: TouchEvent) => {
+    if (!_isDragging || !_anchor || !_activeShadow || !_selectionCallback) return
+    const touch = e.touches[0]
+    if (!touch) return
+
+    e.preventDefault()
+
+    const info = _getLineInfoAtPoint(_activeShadow, touch.clientX, touch.clientY)
+    if (!info) return
+
+    const range: SelectedLineRange = {
+      start: _anchor.lineNumber,
+      end: info.lineNumber,
+      side: _anchor.side,
+      endSide: info.side !== _anchor.side ? info.side : undefined,
+    }
+    _selectionRef = range
+    _selectionCallback(range)
+  }, { passive: false })
+
+  document.addEventListener('touchend', () => {
+    _anchor = null
+    _isDragging = false
+    _activeShadow = null
+  })
+}
+
+function useTouchLineSelection(
+  onSelectionChange: (range: SelectedLineRange | null) => void,
+) {
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    _selectionCallback = onSelectionChange
+    _installTouchHandlers()
+    return () => {
+      if (_selectionCallback === onSelectionChange) {
+        _selectionCallback = null
+      }
+    }
+  }, [onSelectionChange])
+
+  return wrapperRef
+}
+
 /** Renders a single diff. Mounted once and kept alive — visibility controlled by parent. */
-function FileDiffPanel({ diff, themeType }: { diff: DiffData; themeType: ThemeType }) {
+function FileDiffPanel({
+  diff,
+  themeType,
+  selectedLines,
+  onLineSelected,
+}: {
+  diff: DiffData
+  themeType: ThemeType
+  selectedLines: SelectedLineRange | null
+  onLineSelected: (range: SelectedLineRange | null) => void
+}) {
+  const wrapperRef = useTouchLineSelection(onLineSelected)
+
   if (isImageFile(diff.file)) {
     return <ImageDiff filename={diff.file} before={diff.before} after={diff.after} themeType={themeType} />
   }
 
   return (
-    <MultiFileDiff
-      oldFile={{ name: diff.file, contents: diff.before }}
-      newFile={{ name: diff.file, contents: diff.after }}
-      options={{
-        theme: THEME,
-        themeType,
-        diffStyle: 'unified',
-        disableFileHeader: true,
-        unsafeCSS: STONE_CSS,
-      }}
-    />
+    <div ref={wrapperRef}>
+      <MultiFileDiff
+        oldFile={{ name: diff.file, contents: diff.before }}
+        newFile={{ name: diff.file, contents: diff.after }}
+        selectedLines={selectedLines}
+        options={{
+          theme: THEME,
+          themeType,
+          diffStyle: 'unified',
+          disableFileHeader: true,
+          unsafeCSS: STONE_CSS,
+          // Don't use the library's line selection — it doesn't work on iOS touch.
+          // We drive selection via our own touch handlers and the controlled
+          // selectedLines prop.
+        }}
+      />
+    </div>
   )
 }
 
@@ -195,6 +381,13 @@ function App() {
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [themeType, setThemeType] = useState<ThemeType>('system')
+  // Per-file controlled selection state
+  const [selections, setSelections] = useState<Record<string, SelectedLineRange | null>>({})
+
+  const handleLineSelected = useCallback((file: string, range: SelectedLineRange | null) => {
+    setSelections((prev) => ({ ...prev, [file]: range }))
+    postToNative({ type: 'lineSelection', file, range })
+  }, [])
 
   // On mount, check for pre-injected data from injectedJavaScriptBeforeContentLoaded
   useEffect(() => {
@@ -227,6 +420,13 @@ function App() {
         } else if (msg.type === 'setColorScheme') {
           if (msg.colorScheme === 'light' || msg.colorScheme === 'dark') {
             setThemeType(msg.colorScheme)
+          }
+        } else if (msg.type === 'clearSelection') {
+          // Clear selection for a specific file, or all files
+          if (msg.file) {
+            setSelections((prev) => ({ ...prev, [msg.file]: null }))
+          } else {
+            setSelections({})
           }
         }
       } catch {
@@ -277,7 +477,12 @@ function App() {
           key={diff.file}
           style={{ display: activeFile === diff.file ? 'block' : 'none' }}
         >
-          <FileDiffPanel diff={diff} themeType={themeType} />
+          <FileDiffPanel
+            diff={diff}
+            themeType={themeType}
+            selectedLines={selections[diff.file] ?? null}
+            onLineSelected={(range) => handleLineSelected(diff.file, range)}
+          />
         </div>
       ))}
     </>

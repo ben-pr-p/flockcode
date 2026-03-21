@@ -1,10 +1,12 @@
-import React, { useRef, useState, useCallback } from 'react'
+import React, { useRef, useState, useCallback, useMemo } from 'react'
 import { View, Text, Pressable, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { Mic, Plus, ChevronDown } from 'lucide-react-native'
 import type { RecordingState } from '../hooks/useAudioRecorder'
 import type { PendingCommand } from '../state/settings'
+import { lineSelectionAtom } from '../state/line-selection'
 
 interface VoiceInputAreaProps {
   textValue: string
@@ -56,6 +58,20 @@ export function VoiceInputArea({
   const inputIconColor = isDark ? '#57534E' : '#A8A29E'
   const micIconColor = isDark ? '#0C0A09' : '#FAFAF9'
   const selectorColor = isDark ? '#57534E' : '#A8A29E'
+
+  // Line selection from the diff viewer
+  const lineSelection = useAtomValue(lineSelectionAtom)
+  const setLineSelection = useSetAtom(lineSelectionAtom)
+  const lineSelectionLabel = useMemo(() => {
+    if (!lineSelection) return null
+    // Show just the basename for brevity
+    const parts = lineSelection.file.split('/')
+    const basename = parts[parts.length - 1]
+    if (lineSelection.startLine === lineSelection.endLine) {
+      return `${basename}:${lineSelection.startLine}`
+    }
+    return `${basename}:${lineSelection.startLine}-${lineSelection.endLine}`
+  }, [lineSelection])
 
   // Tap: starts recording, locked on — tap again to stop.
   // Hold (>300ms): starts recording — release to stop.
@@ -121,6 +137,20 @@ export function VoiceInputArea({
               </Text>
               <Pressable onPress={onClearCommand} hitSlop={8}>
                 <Text className="text-[10px] text-amber-600 dark:text-amber-400">{'\u2715'}</Text>
+              </Pressable>
+            </View>
+          )}
+          {lineSelectionLabel && (
+            <View className="flex-row items-center bg-blue-500/15 rounded-md px-2 py-1 gap-1 self-end mb-0.5">
+              <Text
+                className="text-[10px] font-semibold text-blue-600 dark:text-blue-400"
+                style={{ fontFamily: 'JetBrains Mono' }}
+                numberOfLines={1}
+              >
+                {lineSelectionLabel}
+              </Text>
+              <Pressable onPress={() => setLineSelection(null)} hitSlop={8}>
+                <Text className="text-[10px] text-blue-600 dark:text-blue-400">{'\u2715'}</Text>
               </Pressable>
             </View>
           )}
