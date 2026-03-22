@@ -3,9 +3,10 @@ import { View, Text, Pressable, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Mic, Plus, ChevronDown } from 'lucide-react-native'
+import { Mic, Plus, ChevronDown, Headphones } from 'lucide-react-native'
 import type { RecordingState } from '../hooks/useAudioRecorder'
 import type { PendingCommand } from '../state/settings'
+import { handsFreeActiveAtom, nativeRecordingAtom } from '../state/settings'
 import { lineSelectionAtom } from '../state/line-selection'
 
 interface VoiceInputAreaProps {
@@ -30,6 +31,8 @@ interface VoiceInputAreaProps {
   pendingCommand?: PendingCommand | null
   /** Dismiss the queued command. */
   onClearCommand?: () => void
+  /** Toggle hands-free mode on/off. */
+  onHandsFreeToggle?: () => void
 }
 
 export function VoiceInputArea({
@@ -50,10 +53,13 @@ export function VoiceInputArea({
   onAgentPress,
   pendingCommand,
   onClearCommand,
+  onHandsFreeToggle,
 }: VoiceInputAreaProps) {
   const insets = useSafeAreaInsets()
   const { colorScheme } = useColorScheme()
   const isDark = colorScheme === 'dark'
+  const isHandsFreeActive = useAtomValue(handsFreeActiveAtom)
+  const isNativeRecording = useAtomValue(nativeRecordingAtom)
   const placeholderColor = isDark ? '#57534E' : '#A8A29E'
   const inputIconColor = isDark ? '#57534E' : '#A8A29E'
   const micIconColor = isDark ? '#0C0A09' : '#FAFAF9'
@@ -199,21 +205,46 @@ export function VoiceInputArea({
           </Pressable>
         </View>
 
-        {/* Mic button — tap to lock record, hold to record */}
-        <Pressable
-          onPressIn={handlePressIn}
-          onPressOut={handlePressOut}
-          className="w-[52px] h-[52px] rounded-full items-center justify-center"
-          style={{
-            backgroundColor: recordingState === 'recording' ? '#EF4444' : '#F59E0B',
-          }}
-        >
-          {recordingState === 'recording' ? (
-            <View className="w-5 h-5 rounded-sm bg-stone-50 dark:bg-stone-900" />
-          ) : (
-            <Mic size={22} color={micIconColor} />
+        {/* Hands-free toggle + mic button */}
+        <View className="flex-row items-center gap-3">
+          {onHandsFreeToggle && (
+            <Pressable
+              onPress={onHandsFreeToggle}
+              className="w-9 h-9 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: isHandsFreeActive
+                  ? (isDark ? '#7C3AED' : '#8B5CF6')
+                  : (isDark ? '#292524' : '#E7E5E4'),
+              }}
+            >
+              <Headphones
+                size={16}
+                color={isHandsFreeActive ? '#FAFAF9' : selectorColor}
+              />
+            </Pressable>
           )}
-        </Pressable>
+
+          {/* Mic button — tap to lock record, hold to record.
+              Disabled during native CallKit recording (headphone-initiated). */}
+          <Pressable
+            onPressIn={isNativeRecording ? undefined : handlePressIn}
+            onPressOut={isNativeRecording ? undefined : handlePressOut}
+            disabled={isNativeRecording}
+            className="w-[52px] h-[52px] rounded-full items-center justify-center"
+            style={{
+              backgroundColor: isNativeRecording
+                ? (isDark ? '#292524' : '#D6D3D1')
+                : recordingState === 'recording' ? '#EF4444' : '#F59E0B',
+              opacity: isNativeRecording ? 0.5 : 1,
+            }}
+          >
+            {recordingState === 'recording' ? (
+              <View className="w-5 h-5 rounded-sm bg-stone-50 dark:bg-stone-900" />
+            ) : (
+              <Mic size={22} color={isNativeRecording ? selectorColor : micIconColor} />
+            )}
+          </Pressable>
+        </View>
 
         <View className="flex-1 items-end">
           <Pressable className="flex-row items-center gap-1" onPress={onModelPress}>
@@ -226,12 +257,30 @@ export function VoiceInputArea({
       </View>
 
       {/* Recording state hint */}
-      {recordingState === 'recording' && (
+      {isNativeRecording && (
+        <Text
+          className="text-center text-xs text-purple-500 dark:text-purple-400 mt-1 mb-1"
+          style={{ fontFamily: 'JetBrains Mono' }}
+        >
+          recording · press pause to send
+        </Text>
+      )}
+      {!isNativeRecording && recordingState === 'recording' && (
         <Text
           className="text-center text-xs text-stone-500 dark:text-stone-400 mt-1 mb-1"
           style={{ fontFamily: 'JetBrains Mono' }}
         >
-          {locked ? 'recording · tap to send' : 'recording · release to send'}
+          {locked
+            ? 'recording · tap to send'
+            : 'recording · release to send'}
+        </Text>
+      )}
+      {isHandsFreeActive && !isNativeRecording && recordingState !== 'recording' && (
+        <Text
+          className="text-center text-xs text-purple-500 dark:text-purple-400 mt-1 mb-1"
+          style={{ fontFamily: 'JetBrains Mono' }}
+        >
+          hands-free · press pause to record
         </Text>
       )}
     </View>

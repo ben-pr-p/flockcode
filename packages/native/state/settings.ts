@@ -7,6 +7,12 @@ import { backendConnectionsAtom } from './backends';
 export const handsFreeAutoRecordAtom = atom(true);
 export const notificationSoundAtom = atom<NotificationSound>('chime');
 
+/** Whether hands-free (headphone button) mode is currently active. */
+export const handsFreeActiveAtom = atom(false);
+
+/** Whether a native CallKit recording is in progress (headphone-initiated). */
+export const nativeRecordingAtom = atom(false);
+
 /**
  * Aggregate connection info across all backends.
  * Reports 'connected' if any backend is connected, 'reconnecting' if any is

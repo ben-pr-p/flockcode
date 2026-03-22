@@ -55,6 +55,8 @@ interface SessionScreenProps {
   onMerge?: () => void
   /** Optional server selector element rendered below the worktree toggle (new sessions only). */
   serverSelector?: React.ReactNode
+  /** Toggle hands-free mode on/off. */
+  onHandsFreeToggle?: () => void
 }
 
 export function SessionScreen({
@@ -85,6 +87,7 @@ export function SessionScreen({
   isMerging,
   onMerge,
   serverSelector,
+  onHandsFreeToggle,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -156,6 +159,7 @@ export function SessionScreen({
           onAgentPress={onAgentPress}
           pendingCommand={pendingCommand}
           onClearCommand={onClearCommand}
+          onHandsFreeToggle={onHandsFreeToggle}
         />
       )}
     </KeyboardAvoidingView>

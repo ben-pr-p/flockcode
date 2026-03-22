@@ -25,6 +25,7 @@ import { backendResourcesAtom } from '../lib/backend-streams';
 import { useBackendStateQuery } from '../lib/merged-query';
 import { MergedStateQuery, type WithBackendUrl } from '../lib/merged-query';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
+import { useHandsFreeMode } from '../hooks/useHandsFreeMode';
 import { useModels } from '../hooks/useModels';
 import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
@@ -246,8 +247,9 @@ export function SessionView({
     return merged;
   }, [serverMessagesList, pendingVoiceMessages]);
 
-  const audioRecorder = useAudioRecorder({
-    onSendAudio: (base64, mimeType) => {
+  // Shared helper: adds a pending voice message and sends audio to the server.
+  const sendVoiceAudio = useCallback(
+    (base64: string, mimeType: string) => {
       const pendingId = `voice-${++voiceIdCounter.current}`;
       setPendingVoiceMessages((prev) => [
         ...prev,
@@ -268,7 +270,31 @@ export function SessionView({
       ]);
       onSendAudio(base64, mimeType, effectiveModel);
     },
+    [sessionId, onSendAudio, effectiveModel],
+  );
+
+  const audioRecorder = useAudioRecorder({
+    onSendAudio: sendVoiceAudio,
+    onRecordingComplete: async () => {
+      // After expo-av recording finishes, restore the playback session so
+      // hands-free headphone button works again via A2DP.
+      try {
+        const HandsFreeMedia = (await import('../modules/hands-free-media')).default
+        await HandsFreeMedia?.restorePlaybackSession()
+      } catch {
+        // Module may not be available — that's fine
+      }
+    },
   });
+
+  // Hands-free mode: headphone button starts a CallKit call which records
+  // via AVAudioEngine natively. The recorded audio is delivered to sendVoiceAudio.
+  const handsFree = useHandsFreeMode(
+    audioRecorder.recordingState,
+    audioRecorder.startRecording,
+    audioRecorder.stopRecording,
+    sendVoiceAudio,
+  );
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -370,6 +396,7 @@ export function SessionView({
           worktreeStatus={worktreeStatus}
           isMerging={isMerging}
           onMerge={handleMerge}
+          onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
         />
         {modelSheet}
         {agentCommandSheet}
@@ -406,6 +433,7 @@ export function SessionView({
         isMerging={isMerging}
         onMerge={handleMerge}
         serverSelector={serverSelector}
+        onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
       />
       {modelSheet}
       {agentCommandSheet}

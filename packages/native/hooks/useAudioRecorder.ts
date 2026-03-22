@@ -5,9 +5,11 @@ export type RecordingState = 'idle' | 'recording'
 
 interface UseAudioRecorderOptions {
   onSendAudio: (base64: string, mimeType: string) => void
+  /** Called after recording stops to restore audio session (e.g. for hands-free mode). */
+  onRecordingComplete?: () => void
 }
 
-export function useAudioRecorder({ onSendAudio }: UseAudioRecorderOptions) {
+export function useAudioRecorder({ onSendAudio, onRecordingComplete }: UseAudioRecorderOptions) {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle')
   const recordingRef = useRef<Audio.Recording | null>(null)
   const recordingStartedAtRef = useRef(0)
@@ -68,8 +70,10 @@ export function useAudioRecorder({ onSendAudio }: UseAudioRecorderOptions) {
       onSendAudio(base64, blob.type || 'audio/mp4')
     } catch (err) {
       console.error('[useAudioRecorder] stopRecording failed:', err)
+    } finally {
+      onRecordingComplete?.()
     }
-  }, [onSendAudio])
+  }, [onSendAudio, onRecordingComplete])
 
   const cancelRecording = useCallback(async () => {
     const recording = recordingRef.current
@@ -83,7 +87,8 @@ export function useAudioRecorder({ onSendAudio }: UseAudioRecorderOptions) {
       console.error('[useAudioRecorder] cancelRecording failed:', err)
     }
     setRecordingState('idle')
-  }, [])
+    onRecordingComplete?.()
+  }, [onRecordingComplete])
 
   return { recordingState, startRecording, stopRecording, cancelRecording }
 }

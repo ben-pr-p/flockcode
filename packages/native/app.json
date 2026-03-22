@@ -18,6 +18,14 @@
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for voice input."
         }
+      ],
+      [
+        "expo-asset",
+        {
+          "assets": [
+            "./assets/silence.mp3"
+          ]
+        }
       ]
     ],
     "orientation": "default",
@@ -33,10 +41,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "7",
+      "buildNumber": "8",
       "bundleIdentifier": "xyz.bprp.flockcode",
       "appleTeamId": "UX4LJ86VY7",
       "infoPlist": {
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ],
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
@@ -57,8 +69,11 @@
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      ],
+      "package": "xyz.bprp.flockcode"
     },
     "extra": {
       "router": {},

@@ -74,6 +74,8 @@ interface SplitLayoutProps {
   isMerging?: boolean;
   /** Callback to trigger a merge. */
   onMerge?: () => void;
+  /** Toggle hands-free mode on/off. */
+  onHandsFreeToggle?: () => void;
 }
 
 export function SplitLayout({
@@ -100,6 +102,7 @@ export function SplitLayout({
   worktreeStatus,
   isMerging,
   onMerge,
+  onHandsFreeToggle,
 }: SplitLayoutProps) {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -241,6 +244,7 @@ export function SplitLayout({
               onAgentPress={onAgentPress}
               pendingCommand={pendingCommand}
               onClearCommand={onClearCommand}
+              onHandsFreeToggle={onHandsFreeToggle}
             />
           )}
         </KeyboardAvoidingView>

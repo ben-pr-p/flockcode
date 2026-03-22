@@ -60,6 +60,11 @@
   },
   "main": "expo-router/entry",
   "private": true,
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  },
   "patchedDependencies": {
     "streamdown-rn@0.2.1": "patches/streamdown-rn@0.2.1.patch"
   }
