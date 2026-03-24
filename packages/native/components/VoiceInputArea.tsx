@@ -3,10 +3,10 @@ import { View, Text, Pressable, TextInput } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useColorScheme } from 'nativewind'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { Mic, Plus, ChevronDown, Headphones } from 'lucide-react-native'
+import { Mic, Plus, ChevronDown, Droplets, Footprints } from 'lucide-react-native'
 import type { RecordingState } from '../hooks/useAudioRecorder'
-import type { PendingCommand } from '../state/settings'
-import { handsFreeActiveAtom, nativeRecordingAtom } from '../state/settings'
+import type { PendingCommand, HandsFreeMode } from '../state/settings'
+import { handsFreeActiveAtom, nativeRecordingAtom, handsFreeModeAtom } from '../state/settings'
 import { lineSelectionAtom } from '../state/line-selection'
 
 interface VoiceInputAreaProps {
@@ -33,6 +33,8 @@ interface VoiceInputAreaProps {
   onClearCommand?: () => void
   /** Toggle hands-free mode on/off. */
   onHandsFreeToggle?: () => void
+  /** Open the hands-free mode picker (long-press). */
+  onHandsFreeLongPress?: () => void
 }
 
 export function VoiceInputArea({
@@ -54,12 +56,15 @@ export function VoiceInputArea({
   pendingCommand,
   onClearCommand,
   onHandsFreeToggle,
+  onHandsFreeLongPress,
 }: VoiceInputAreaProps) {
   const insets = useSafeAreaInsets()
   const { colorScheme } = useColorScheme()
   const isDark = colorScheme === 'dark'
   const isHandsFreeActive = useAtomValue(handsFreeActiveAtom)
   const isNativeRecording = useAtomValue(nativeRecordingAtom)
+  const handsFreeMode = useAtomValue(handsFreeModeAtom)
+  const HandsFreeIcon = handsFreeMode === 'walking' ? Footprints : Droplets
   const placeholderColor = isDark ? '#57534E' : '#A8A29E'
   const inputIconColor = isDark ? '#57534E' : '#A8A29E'
   const micIconColor = isDark ? '#0C0A09' : '#FAFAF9'
@@ -210,15 +215,17 @@ export function VoiceInputArea({
           {onHandsFreeToggle && (
             <Pressable
               onPress={onHandsFreeToggle}
-              className="w-9 h-9 rounded-full items-center justify-center"
+              onLongPress={onHandsFreeLongPress}
+              delayLongPress={400}
+              className="w-11 h-11 rounded-full items-center justify-center"
               style={{
                 backgroundColor: isHandsFreeActive
                   ? (isDark ? '#7C3AED' : '#8B5CF6')
                   : (isDark ? '#292524' : '#E7E5E4'),
               }}
             >
-              <Headphones
-                size={16}
+              <HandsFreeIcon
+                size={18}
                 color={isHandsFreeActive ? '#FAFAF9' : selectorColor}
               />
             </Pressable>
@@ -280,7 +287,7 @@ export function VoiceInputArea({
           className="text-center text-xs text-purple-500 dark:text-purple-400 mt-1 mb-1"
           style={{ fontFamily: 'JetBrains Mono' }}
         >
-          hands-free · press pause to record
+          {handsFreeMode === 'walking' ? 'walking' : 'washing dishes'} · press pause to record
         </Text>
       )}
     </View>

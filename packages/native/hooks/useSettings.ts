@@ -2,7 +2,6 @@ import { useAtom, useAtomValue } from 'jotai';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import {
-  handsFreeAutoRecordAtom,
   notificationSoundAtom,
   connectionInfoAtom,
 } from '../state/settings';
@@ -19,7 +18,6 @@ export function useSettings() {
   const [backends, setBackends] = useAtom(backendsAtom);
   const resolvedBackends = backends instanceof Promise ? [] : backends;
   const connections = useAtomValue(backendConnectionsAtom);
-  const [handsFreeAutoRecord, setHandsFreeAutoRecord] = useAtom(handsFreeAutoRecordAtom);
   const [notificationSound, setNotificationSound] = useAtom(notificationSoundAtom);
 
   // Aggregate connection info across all backends
@@ -43,8 +41,6 @@ export function useSettings() {
     connections,
 
     // Voice settings
-    handsFreeAutoRecord,
-    setHandsFreeAutoRecord,
     notificationSound,
     setNotificationSound,
     notificationSoundOptions: NOTIFICATION_SOUND_OPTIONS,

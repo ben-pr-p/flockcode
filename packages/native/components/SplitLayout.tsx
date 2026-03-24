@@ -51,8 +51,6 @@ interface SplitLayoutProps {
     backends: BackendConfig[];
     setBackends: (backends: BackendConfig[]) => void;
     connections: Record<BackendUrl, BackendConnection>;
-    handsFreeAutoRecord: boolean;
-    setHandsFreeAutoRecord: (value: boolean) => void;
     notificationSound: NotificationSound;
     setNotificationSound: (value: NotificationSound) => void;
     notificationSoundOptions: { label: string; value: NotificationSound }[];
@@ -76,6 +74,8 @@ interface SplitLayoutProps {
   onMerge?: () => void;
   /** Toggle hands-free mode on/off. */
   onHandsFreeToggle?: () => void;
+  /** Open the hands-free mode picker (long-press). */
+  onHandsFreeLongPress?: () => void;
 }
 
 export function SplitLayout({
@@ -103,6 +103,7 @@ export function SplitLayout({
   isMerging,
   onMerge,
   onHandsFreeToggle,
+  onHandsFreeLongPress,
 }: SplitLayoutProps) {
   const insets = useSafeAreaInsets();
   const { colorScheme } = useColorScheme();
@@ -245,6 +246,7 @@ export function SplitLayout({
               pendingCommand={pendingCommand}
               onClearCommand={onClearCommand}
               onHandsFreeToggle={onHandsFreeToggle}
+              onHandsFreeLongPress={onHandsFreeLongPress}
             />
           )}
         </KeyboardAvoidingView>
@@ -279,8 +281,6 @@ export function SplitLayout({
               onBackendsChange={settings.setBackends}
               connections={settings.connections}
               connection={settings.connection}
-              handsFreeAutoRecord={settings.handsFreeAutoRecord}
-              onHandsFreeAutoRecordChange={settings.setHandsFreeAutoRecord}
               notificationSound={settings.notificationSound}
               onNotificationSoundChange={settings.setNotificationSound}
               notificationSoundOptions={settings.notificationSoundOptions}

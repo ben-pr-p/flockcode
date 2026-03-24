@@ -37,6 +37,16 @@ declare class HandsFreeMediaModuleClass extends NativeModule<HandsFreeMediaEvent
   restorePlaybackSession(): Promise<boolean>
   /** Deactivate hands-free mode: ends any active call, stops silent audio, unregisters remote commands, releases audio session. */
   deactivate(): Promise<boolean>
+  /**
+   * Play a bundled short audio file (e.g. "completion" chime) through the
+   * current audio session. Works while the phone is locked.
+   */
+  playSound(soundName: string): Promise<boolean>
+  /**
+   * Play raw base64-encoded audio data (e.g. TTS response) through the current
+   * audio session. Works while the phone is locked.
+   */
+  playAudioData(base64: string, mimeType: string): Promise<boolean>
 }
 
 export default requireOptionalNativeModule<HandsFreeMediaModuleClass>('HandsFreeMedia')

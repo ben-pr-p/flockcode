@@ -57,6 +57,8 @@ interface SessionScreenProps {
   serverSelector?: React.ReactNode
   /** Toggle hands-free mode on/off. */
   onHandsFreeToggle?: () => void
+  /** Open the hands-free mode picker (long-press). */
+  onHandsFreeLongPress?: () => void
 }
 
 export function SessionScreen({
@@ -88,6 +90,7 @@ export function SessionScreen({
   onMerge,
   serverSelector,
   onHandsFreeToggle,
+  onHandsFreeLongPress,
 }: SessionScreenProps) {
   const insets = useSafeAreaInsets()
   const [textValue, setTextValue] = useState('')
@@ -160,6 +163,7 @@ export function SessionScreen({
           pendingCommand={pendingCommand}
           onClearCommand={onClearCommand}
           onHandsFreeToggle={onHandsFreeToggle}
+          onHandsFreeLongPress={onHandsFreeLongPress}
         />
       )}
     </KeyboardAvoidingView>

@@ -17,8 +17,6 @@ export default function SettingsModal() {
       onBackendsChange={settings.setBackends}
       connections={settings.connections}
       connection={settings.connection}
-      handsFreeAutoRecord={settings.handsFreeAutoRecord}
-      onHandsFreeAutoRecordChange={settings.setHandsFreeAutoRecord}
       notificationSound={settings.notificationSound}
       onNotificationSoundChange={settings.setNotificationSound}
       notificationSoundOptions={settings.notificationSoundOptions}

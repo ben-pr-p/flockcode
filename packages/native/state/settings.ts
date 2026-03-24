@@ -4,8 +4,20 @@ import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings
 import { asyncStorageAdapter } from '../lib/jotai-async-storage';
 import { backendConnectionsAtom } from './backends';
 
-export const handsFreeAutoRecordAtom = atom(true);
 export const notificationSoundAtom = atom<NotificationSound>('chime');
+
+/** Hands-free mode: determines behavior when headphone button recording completes. */
+export type HandsFreeMode = 'washing-dishes' | 'walking';
+
+/**
+ * User's preferred hands-free mode. Persisted to AsyncStorage so it
+ * survives app restarts. Defaults to 'washing-dishes'.
+ */
+export const handsFreeModeAtom = atomWithStorage<HandsFreeMode>(
+  'settings:handsFreeMode',
+  'washing-dishes',
+  asyncStorageAdapter<HandsFreeMode>(),
+);
 
 /** Whether hands-free (headphone button) mode is currently active. */
 export const handsFreeActiveAtom = atom(false);

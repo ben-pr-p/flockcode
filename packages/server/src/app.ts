@@ -10,6 +10,7 @@ import { createClient, Opencode, handleOpencodeEvent } from "./opencode"
 import { env } from "./env"
 import { StateStream } from "./state-stream"
 import { sendPrompt } from "./prompt"
+import { handleVoicePrompt } from "./voice-prompt"
 import { WorktreeDriver } from "./worktree"
 import { logger } from 'hono/logger'
 import type { Session } from "./types"
@@ -449,6 +450,39 @@ export async function createApp(opencodeUrl: string) {
         } catch (err: any) {
           console.error("[POST /api/sessions/:sessionId/command]", err)
           return c.json({ error: err.message ?? "Command failed" }, 500)
+        }
+      },
+    )
+
+    // Walking-mode voice prompt: transcribe → route → optionally respond with TTS
+    .post(
+      "/sessions/:sessionId/voice-prompt",
+      zValidator("json", z.object({
+        audioData: z.string(),
+        mimeType: z.string().optional(),
+        model: z.object({
+          providerID: z.string(),
+          modelID: z.string(),
+        }).optional(),
+      })),
+      async (c) => {
+        const sessionId = c.req.param("sessionId")
+        const { audioData, mimeType, model } = c.req.valid("json")
+        try {
+          const sessionRes = await client.session.get({ path: { id: sessionId } })
+          const directory = (sessionRes.data as any)?.directory as string | undefined
+          const result = await handleVoicePrompt(
+            client,
+            sessionId,
+            audioData,
+            mimeType ?? "audio/x-caf",
+            directory,
+            model,
+          )
+          return c.json(result)
+        } catch (err: any) {
+          console.error("[POST /api/sessions/:sessionId/voice-prompt]", err)
+          return c.json({ error: err.message ?? "Voice prompt failed" }, 500)
         }
       },
     )

@@ -11,8 +11,6 @@ interface SettingsScreenProps {
   onBackendsChange: (backends: BackendConfig[]) => void
   connections: Record<string, BackendConnection>
   connection: ConnectionInfo
-  handsFreeAutoRecord: boolean
-  onHandsFreeAutoRecordChange: (value: boolean) => void
   notificationSound: NotificationSound
   onNotificationSoundChange: (value: NotificationSound) => void
   notificationSoundOptions: { label: string; value: NotificationSound }[]
@@ -25,8 +23,6 @@ export function SettingsScreen({
   onBackendsChange,
   connections,
   connection,
-  handsFreeAutoRecord,
-  onHandsFreeAutoRecordChange,
   notificationSound,
   onNotificationSoundChange,
   notificationSoundOptions,
@@ -168,21 +164,6 @@ export function SettingsScreen({
 
         {/* VOICE MODE section */}
         <SectionHeader title="VOICE MODE" />
-
-        <SettingsRow
-          label="Hands-free auto-record"
-          description="Auto-record when agent finishes"
-        >
-          <Switch
-            testID="auto-record-toggle"
-            value={handsFreeAutoRecord}
-            onValueChange={onHandsFreeAutoRecordChange}
-            trackColor={{ false: colorScheme === 'dark' ? '#292524' : '#E7E5E4', true: '#F59E0B' }}
-            thumbColor="#FFFFFF"
-          />
-        </SettingsRow>
-
-        <AutoRecordBehavior />
 
         <SettingsRow label="Notification sound">
           <DropdownPicker
@@ -494,25 +475,4 @@ function DropdownPicker<T extends string | number>({
   )
 }
 
-// --- Auto-record behavior summary ---
 
-function AutoRecordBehavior() {
-  return (
-    <View className="px-5 pb-2">
-      <View className="bg-white dark:bg-stone-900 rounded-lg px-3.5 py-3 gap-2">
-        <BehaviorItem text="Pauses system audio when agent finishes responding" />
-        <BehaviorItem text="Plays a beep to notify you" />
-        <BehaviorItem text="Automatically starts recording your response" />
-      </View>
-    </View>
-  )
-}
-
-function BehaviorItem({ text }: { text: string }) {
-  return (
-    <View className="flex-row items-start gap-2">
-      <Text className="text-xs text-stone-400 dark:text-stone-600 mt-0.5">•</Text>
-      <Text className="text-xs text-stone-700 dark:text-stone-400 flex-1">{text}</Text>
-    </View>
-  )
-}

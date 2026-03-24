@@ -23,7 +23,8 @@
         "expo-asset",
         {
           "assets": [
-            "./assets/silence.mp3"
+            "./assets/silence.mp3",
+            "./assets/completion.wav"
           ]
         }
       ]
@@ -41,7 +42,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "8",
+      "buildNumber": "9",
       "bundleIdentifier": "xyz.bprp.flockcode",
       "appleTeamId": "UX4LJ86VY7",
       "infoPlist": {

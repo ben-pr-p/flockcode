@@ -405,6 +405,53 @@ public class HandsFreeMediaModule: Module {
       return self.restorePlayback()
     }
 
+    AsyncFunction("playSound") { (soundName: String) -> Bool in
+      guard self.isActive else {
+        logger.warning("playSound called but not active")
+        return false
+      }
+      guard let url = Bundle.main.url(forResource: soundName, withExtension: "mp3")
+              ?? Bundle.main.url(forResource: soundName, withExtension: "wav")
+              ?? Bundle.main.url(forResource: soundName, withExtension: "caf") else {
+        logger.error("playSound: resource not found: \(soundName)")
+        return false
+      }
+      return self.playBundledAudio(from: url)
+    }
+
+    AsyncFunction("playAudioData") { (base64: String, mimeType: String) -> Bool in
+      self.sendEvent("onDiagnostic", ["message": "playAudioData called: mimeType=\(mimeType), dataLength=\(base64.count) chars, isActive=\(self.isActive)"])
+      guard self.isActive else {
+        logger.warning("playAudioData called but not active")
+        return false
+      }
+      guard let data = Data(base64Encoded: base64) else {
+        logger.error("playAudioData: invalid base64 data")
+        self.sendEvent("onDiagnostic", ["message": "playAudioData: invalid base64"])
+        return false
+      }
+      self.sendEvent("onDiagnostic", ["message": "playAudioData: decoded \(data.count) bytes"])
+      // Write to a temporary file so AVAudioPlayer can handle it
+      let ext = self.extensionForMimeType(mimeType)
+      let tempDir = FileManager.default.temporaryDirectory
+      let fileName = "tts_\(UUID().uuidString).\(ext)"
+      let fileURL = tempDir.appendingPathComponent(fileName)
+      do {
+        try data.write(to: fileURL)
+        let result = self.playBundledAudio(from: fileURL)
+        self.sendEvent("onDiagnostic", ["message": "playAudioData: playBundledAudio returned \(result)"])
+        // Clean up the temporary file after a delay (let playback finish)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+          try? FileManager.default.removeItem(at: fileURL)
+        }
+        return result
+      } catch {
+        logger.error("playAudioData: failed to write temp file — \(error.localizedDescription)")
+        self.sendEvent("onDiagnostic", ["message": "playAudioData: write failed — \(error.localizedDescription)"])
+        return false
+      }
+    }
+
     AsyncFunction("deactivate") { () -> Bool in
       logger.info("deactivating...")
       // End any active CallKit call first
@@ -448,6 +495,14 @@ public class HandsFreeMediaModule: Module {
       // CallKit manages the audio session; onRecordingStarted will fire
       // once AVAudioEngine is running.
       logger.info("starting CallKit call for recording")
+
+      // Interrupt any in-progress TTS or sound playback first
+      if soundPlayer?.isPlaying == true {
+        logger.info("interrupting playback for new recording")
+        sendEvent("onDiagnostic", ["message": "stopping soundPlayer before recording"])
+        stopCurrentPlayback()
+      }
+
       sendEvent("onDiagnostic", ["message": "pausing queuePlayer, starting CallKit call"])
       queuePlayer?.pause()
       manager.startCall()
@@ -495,6 +550,61 @@ public class HandsFreeMediaModule: Module {
     }
   }
 
+  // MARK: Audio Playback Helpers
+
+  /// Audio player for sound effects and TTS playback.
+  private var soundPlayer: AVAudioPlayer?
+
+  /// Plays audio from a file URL through the current audio session.
+  /// Temporarily ducks the silent loop player.
+  @discardableResult
+  private func playBundledAudio(from url: URL) -> Bool {
+    do {
+      let player = try AVAudioPlayer(contentsOf: url)
+      player.volume = 1.0
+      player.prepareToPlay()
+      // Duck the silent loop while the sound plays
+      queuePlayer?.volume = 0.0
+      let started = player.play()
+      sendEvent("onDiagnostic", ["message": "playBundledAudio: play() returned \(started), duration=\(player.duration)s"])
+      self.soundPlayer = player
+      // Restore loop volume after estimated playback duration
+      let duration = max(player.duration, 0.5)
+      DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.2) { [weak self] in
+        self?.queuePlayer?.volume = 0.01
+        self?.soundPlayer = nil
+      }
+      logger.info("playBundledAudio: playing \(url.lastPathComponent) (\(duration)s)")
+      return true
+    } catch {
+      logger.error("playBundledAudio: failed — \(error.localizedDescription)")
+      return false
+    }
+  }
+
+  /// Maps a MIME type to a file extension for temporary file writing.
+  private func extensionForMimeType(_ mimeType: String) -> String {
+    switch mimeType {
+    case "audio/wav", "audio/x-wav", "audio/wave": return "wav"
+    case "audio/mp3", "audio/mpeg": return "mp3"
+    case "audio/aac": return "aac"
+    case "audio/x-caf": return "caf"
+    case "audio/ogg": return "ogg"
+    case "audio/flac": return "flac"
+    case "audio/mp4", "audio/x-m4a": return "m4a"
+    default: return "wav"
+    }
+  }
+
+  /// Stops any in-progress sound/TTS playback.
+  private func stopCurrentPlayback() {
+    if let player = soundPlayer {
+      player.stop()
+      soundPlayer = nil
+    }
+    queuePlayer?.volume = 0.01
+  }
+
   // MARK: Teardown
 
   private func tearDown() {
@@ -514,6 +624,7 @@ public class HandsFreeMediaModule: Module {
     commandCenter.pauseCommand.isEnabled = false
     commandCenter.stopCommand.isEnabled = false
 
+    stopCurrentPlayback()
     queuePlayer?.pause()
     queuePlayer = nil
     playerLooper = nil

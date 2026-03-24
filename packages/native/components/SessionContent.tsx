@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { eq } from '@tanstack/react-db';
 import { SessionScreen } from './SessionScreen';
 import { SplitLayout } from './SplitLayout';
@@ -29,8 +29,11 @@ import { useHandsFreeMode } from '../hooks/useHandsFreeMode';
 import { useModels } from '../hooks/useModels';
 import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
+import { HandsFreeModePicker } from './HandsFreeModePicker';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
-import type { ModelSelection, PendingCommand } from '../state/settings';
+import type { ModelSelection, PendingCommand, HandsFreeMode } from '../state/settings';
+import { handsFreeModeAtom } from '../state/settings';
+import type { VoicePromptResult } from '../hooks/useHandsFreeMode';
 import { lineSelectionAtom, type LineSelection } from '../state/line-selection';
 import { Server, ChevronDown } from 'lucide-react-native';
 import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
@@ -42,8 +45,6 @@ export interface SessionSettings {
   backends: BackendConfig[];
   setBackends: (backends: BackendConfig[]) => void;
   connections: Record<BackendUrl, BackendConnection>;
-  handsFreeAutoRecord: boolean;
-  setHandsFreeAutoRecord: (value: boolean) => void;
   notificationSound: NotificationSound;
   setNotificationSound: (value: NotificationSound) => void;
   notificationSoundOptions: { label: string; value: NotificationSound }[];
@@ -63,6 +64,8 @@ interface SessionViewProps {
   onSendText: (text: string, model: ModelSelection | null, agent?: string) => Promise<void>;
   onSendAudio: (base64: string, mimeType: string, model: ModelSelection | null) => void;
   onExecuteCommand?: (command: string, args: string, model: ModelSelection | null) => Promise<void>;
+  /** Walking-mode voice prompt handler. */
+  onVoicePrompt?: (base64: string, mimeType: string, model: ModelSelection | null) => Promise<VoicePromptResult>;
   onAbort?: () => void;
   /** Whether this is a new session (no session ID yet). Commands are disabled for new sessions. */
   isNewSession?: boolean;
@@ -92,6 +95,7 @@ export function SessionView({
   onSendText,
   onSendAudio,
   onExecuteCommand,
+  onVoicePrompt,
   onAbort,
   emptyMessage,
   sessionModelInfo,
@@ -106,6 +110,8 @@ export function SessionView({
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
   const [agentCommandSheetVisible, setAgentCommandSheetVisible] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
+  const [modePickerVisible, setModePickerVisible] = useState(false);
+  const [handsFreeMode, setHandsFreeMode] = useAtom(handsFreeModeAtom);
 
   // Agent & command state
   const [agentOverride, setAgentOverride] = useState<string | null>(null);
@@ -287,6 +293,16 @@ export function SessionView({
     },
   });
 
+  // Walking-mode voice prompt: wraps the onVoicePrompt callback with the
+  // effective model selection.
+  const handleVoicePrompt = useCallback(
+    async (base64: string, mimeType: string): Promise<VoicePromptResult> => {
+      if (!onVoicePrompt) return { action: 'forwarded' };
+      return onVoicePrompt(base64, mimeType, effectiveModel);
+    },
+    [onVoicePrompt, effectiveModel],
+  );
+
   // Hands-free mode: headphone button starts a CallKit call which records
   // via AVAudioEngine natively. The recorded audio is delivered to sendVoiceAudio.
   const handsFree = useHandsFreeMode(
@@ -294,6 +310,8 @@ export function SessionView({
     audioRecorder.startRecording,
     audioRecorder.stopRecording,
     sendVoiceAudio,
+    onVoicePrompt ? handleVoicePrompt : undefined,
+    session.status,
   );
 
   const handleSend = useCallback(
@@ -397,9 +415,16 @@ export function SessionView({
           isMerging={isMerging}
           onMerge={handleMerge}
           onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
+          onHandsFreeLongPress={() => setModePickerVisible(true)}
         />
         {modelSheet}
         {agentCommandSheet}
+        <HandsFreeModePicker
+          visible={modePickerVisible}
+          onClose={() => setModePickerVisible(false)}
+          mode={handsFreeMode}
+          onModeChange={setHandsFreeMode}
+        />
       </>
     );
   }
@@ -434,9 +459,16 @@ export function SessionView({
         onMerge={handleMerge}
         serverSelector={serverSelector}
         onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
+        onHandsFreeLongPress={() => setModePickerVisible(true)}
       />
       {modelSheet}
       {agentCommandSheet}
+      <HandsFreeModePicker
+        visible={modePickerVisible}
+        onClose={() => setModePickerVisible(false)}
+        mode={handsFreeMode}
+        onModeChange={setHandsFreeMode}
+      />
     </>
   );
 }
@@ -603,6 +635,7 @@ function ExistingSessionDataLoader({
 
   const handleExecuteCommand = useCallback(
     async (command: string, args: string, model: ModelSelection | null) => {
+      if (!api) throw new Error('Not connected');
       const res = await (api.api.sessions[':sessionId'].command as any).$post({
         param: { sessionId },
         json: {
@@ -614,6 +647,23 @@ function ExistingSessionDataLoader({
       if (!res.ok) throw new Error('Command failed');
     },
     [api, sessionId]
+  );
+
+  const handleVoicePrompt = useCallback(
+    async (base64: string, mimeType: string, model: ModelSelection | null): Promise<VoicePromptResult> => {
+      if (!api) throw new Error('Not connected');
+      const res = await (api.api.sessions[':sessionId']['voice-prompt'] as any).$post({
+        param: { sessionId },
+        json: {
+          audioData: base64,
+          mimeType,
+          ...(model ? { model } : {}),
+        },
+      });
+      if (!res.ok) throw new Error('Voice prompt failed');
+      return res.json() as Promise<VoicePromptResult>;
+    },
+    [api, sessionId],
   );
 
   const handleAbort = useCallback(async () => {
@@ -642,6 +692,7 @@ function ExistingSessionDataLoader({
       onSendText={handleSendText}
       onSendAudio={handleSendAudio}
       onExecuteCommand={handleExecuteCommand}
+      onVoicePrompt={handleVoicePrompt}
       onAbort={handleAbort}
       sessionModelInfo={sessionModelInfo}
     />

@@ -1,12 +1,17 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { Alert } from 'react-native'
-import { useAtom, useSetAtom } from 'jotai'
+import { useAtom, useSetAtom, useAtomValue } from 'jotai'
 import HandsFreeMedia from '../modules/hands-free-media'
-import { handsFreeActiveAtom, nativeRecordingAtom } from '../state/settings'
+import { handsFreeActiveAtom, nativeRecordingAtom, handsFreeModeAtom } from '../state/settings'
 import type { RecordingState } from './useAudioRecorder'
 
 /** Whether the native module is available in this binary. */
 const isModuleAvailable = HandsFreeMedia != null
+
+/** Result from the walking-mode voice prompt server endpoint. */
+export type VoicePromptResult =
+  | { action: 'forwarded' }
+  | { action: 'responded'; text: string; audioData: string; mimeType: string }
 
 /**
  * Bridges the native HandsFreeMedia module (with CallKit) to the app's
@@ -25,6 +30,15 @@ const isModuleAvailable = HandsFreeMedia != null
  * 4. The native module restores `.playback` automatically, ready for the
  *    next press.
  *
+ * ## Walking mode
+ *
+ * When the hands-free mode is `'walking'`:
+ * - Audio is routed through `onVoicePrompt` instead of `onSendAudio`.
+ *   The server decides whether to forward to the agent or respond directly
+ *   with TTS audio that gets played back.
+ * - When the session transitions from `busy` to `idle`, a completion chime
+ *   plays so the user knows the agent is done.
+ *
  * The `onToggleRecording` event is still handled as a fallback for cases
  * where CallKit is unavailable.
  */
@@ -33,8 +47,16 @@ export function useHandsFreeMode(
   startRecording: () => void,
   stopRecording: () => void,
   onSendAudio?: (base64: string, mimeType: string) => void,
+  /**
+   * Walking-mode voice prompt handler. Returns the routing result with an
+   * audioUrl (relative path) that the native module can stream from.
+   */
+  onVoicePrompt?: (base64: string, mimeType: string) => Promise<VoicePromptResult>,
+  /** Current session status for detecting busy→idle transitions. */
+  sessionStatus?: 'idle' | 'busy' | 'error',
 ) {
   const [isActive, setIsActive] = useAtom(handsFreeActiveAtom)
+  const handsFreeMode = useAtomValue(handsFreeModeAtom)
 
   // Use refs so event listeners always see the latest values without
   // needing to re-subscribe.
@@ -50,7 +72,32 @@ export function useHandsFreeMode(
   const onSendAudioRef = useRef(onSendAudio)
   onSendAudioRef.current = onSendAudio
 
+  const onVoicePromptRef = useRef(onVoicePrompt)
+  onVoicePromptRef.current = onVoicePrompt
+
+  const handsFreeModeRef = useRef(handsFreeMode)
+  handsFreeModeRef.current = handsFreeMode
+
   const setIsNativeRecording = useSetAtom(nativeRecordingAtom)
+
+  // Track previous session status for busy→idle transition detection
+  const prevSessionStatusRef = useRef(sessionStatus)
+  useEffect(() => {
+    if (
+      isActive &&
+      isModuleAvailable &&
+      handsFreeMode === 'walking' &&
+      prevSessionStatusRef.current === 'busy' &&
+      sessionStatus === 'idle'
+    ) {
+      // Agent just finished — play completion chime
+      console.log('[HandsFree] walking mode: session went busy→idle, playing completion sound')
+      HandsFreeMedia!.playSound('completion').catch((err: any) => {
+        console.error('[HandsFree] playSound failed:', err)
+      })
+    }
+    prevSessionStatusRef.current = sessionStatus
+  }, [sessionStatus, isActive, handsFreeMode])
 
   // Subscribe to native events when active
   useEffect(() => {
@@ -78,7 +125,37 @@ export function useHandsFreeMode(
         )
         setIsNativeRecording(false)
 
-        if (event?.audioData && onSendAudioRef.current) {
+        if (!event?.audioData) return
+
+        // Route audio based on current mode
+        if (handsFreeModeRef.current === 'walking' && onVoicePromptRef.current) {
+          // Walking mode: send through the voice-prompt endpoint
+          console.log('[HandsFree] walking mode: routing audio through voice-prompt')
+          onVoicePromptRef.current(event.audioData, event.mimeType)
+            .then((result) => {
+              console.log('[HandsFree] voice-prompt result:', result.action,
+                result.action === 'responded' ? `audioData=${result.audioData?.length ?? 0} chars, mime=${result.mimeType}` : '')
+              if (result.action === 'responded' && result.audioData) {
+                // Play the TTS response audio
+                console.log('[HandsFree] calling playAudioData...')
+                HandsFreeMedia!.playAudioData(result.audioData, result.mimeType)
+                  .then((ok: boolean) => {
+                    console.log('[HandsFree] playAudioData returned:', ok)
+                  })
+                  .catch((err: any) => {
+                    console.error('[HandsFree] playAudioData failed:', err)
+                  })
+              } else {
+                console.log('[HandsFree] voice prompt forwarded to agent')
+              }
+            })
+            .catch((err: any) => {
+              console.error('[HandsFree] voice prompt failed:', err)
+              // Fall back to normal send
+              onSendAudioRef.current?.(event.audioData!, event.mimeType)
+            })
+        } else if (onSendAudioRef.current) {
+          // Washing dishes mode (or no voice prompt handler): normal send
           onSendAudioRef.current(event.audioData, event.mimeType)
         }
       }),
