@@ -65,7 +65,11 @@ interface SessionViewProps {
   onSendAudio: (base64: string, mimeType: string, model: ModelSelection | null) => void;
   onExecuteCommand?: (command: string, args: string, model: ModelSelection | null) => Promise<void>;
   /** Walking-mode voice prompt handler. */
-  onVoicePrompt?: (base64: string, mimeType: string, model: ModelSelection | null) => Promise<VoicePromptResult>;
+  onVoicePrompt?: (
+    base64: string,
+    mimeType: string,
+    model: ModelSelection | null
+  ) => Promise<VoicePromptResult>;
   onAbort?: () => void;
   /** Whether this is a new session (no session ID yet). Commands are disabled for new sessions. */
   isNewSession?: boolean;
@@ -183,9 +187,7 @@ export function SessionView({
   const projectDir = worktree.split('/').pop() ?? worktree;
   const worktreeDir = sessionDir.split('/').pop() ?? sessionDir;
   const projectName =
-    sessionDir && sessionDir !== worktree
-      ? `${projectDir} / ${worktreeDir}`
-      : projectDir;
+    sessionDir && sessionDir !== worktree ? `${projectDir} / ${worktreeDir}` : projectDir;
 
   const serverMessagesList = useMemo(() => serverMessages, [serverMessages]);
 
@@ -229,15 +231,12 @@ export function SessionView({
     if (pendingVoiceMessages.length === 0) return;
 
     const serverUserMessages = serverMessagesList.filter((m) => m.role === 'user');
-    const latestServerUserTime = serverUserMessages.length > 0
-      ? Math.max(...serverUserMessages.map((m) => m.createdAt))
-      : 0;
+    const latestServerUserTime =
+      serverUserMessages.length > 0 ? Math.max(...serverUserMessages.map((m) => m.createdAt)) : 0;
 
     // Remove pending voice messages whose timestamp is at or before the latest
     // server user message — the server has caught up.
-    const remaining = pendingVoiceMessages.filter(
-      (vm) => vm.createdAt > latestServerUserTime
-    );
+    const remaining = pendingVoiceMessages.filter((vm) => vm.createdAt > latestServerUserTime);
 
     if (remaining.length < pendingVoiceMessages.length) {
       setPendingVoiceMessages(remaining);
@@ -276,7 +275,7 @@ export function SessionView({
       ]);
       onSendAudio(base64, mimeType, effectiveModel);
     },
-    [sessionId, onSendAudio, effectiveModel],
+    [sessionId, onSendAudio, effectiveModel]
   );
 
   const audioRecorder = useAudioRecorder({
@@ -285,8 +284,8 @@ export function SessionView({
       // After expo-av recording finishes, restore the playback session so
       // hands-free headphone button works again via A2DP.
       try {
-        const HandsFreeMedia = (await import('../modules/hands-free-media')).default
-        await HandsFreeMedia?.restorePlaybackSession()
+        const HandsFreeMedia = (await import('../modules/hands-free-media')).default;
+        await HandsFreeMedia?.restorePlaybackSession();
       } catch {
         // Module may not be available — that's fine
       }
@@ -300,7 +299,7 @@ export function SessionView({
       if (!onVoicePrompt) return { action: 'forwarded' };
       return onVoicePrompt(base64, mimeType, effectiveModel);
     },
-    [onVoicePrompt, effectiveModel],
+    [onVoicePrompt, effectiveModel]
   );
 
   // Hands-free mode: headphone button starts a CallKit call which records
@@ -311,7 +310,7 @@ export function SessionView({
     audioRecorder.stopRecording,
     sendVoiceAudio,
     onVoicePrompt ? handleVoicePrompt : undefined,
-    session.status,
+    session.status
   );
 
   const handleSend = useCallback(
@@ -338,12 +337,9 @@ export function SessionView({
     setModelSelectorVisible(false);
   }, []);
 
-  const handleModelSelect = useCallback(
-    (model: ModelSelection | null) => {
-      setModelOverride(model);
-    },
-    []
-  );
+  const handleModelSelect = useCallback((model: ModelSelection | null) => {
+    setModelOverride(model);
+  }, []);
 
   const handleAgentPress = useCallback(() => {
     setAgentCommandSheetVisible(true);
@@ -356,7 +352,6 @@ export function SessionView({
   const handleCommandSelect = useCallback((cmd: PendingCommand) => {
     setPendingCommand(cmd);
   }, []);
-
 
   const modelSheet = (
     <ModelSelectorSheet
@@ -650,7 +645,11 @@ function ExistingSessionDataLoader({
   );
 
   const handleVoicePrompt = useCallback(
-    async (base64: string, mimeType: string, model: ModelSelection | null): Promise<VoicePromptResult> => {
+    async (
+      base64: string,
+      mimeType: string,
+      model: ModelSelection | null
+    ): Promise<VoicePromptResult> => {
       if (!api) throw new Error('Not connected');
       const res = await (api.api.sessions[':sessionId']['voice-prompt'] as any).$post({
         param: { sessionId },
@@ -663,7 +662,7 @@ function ExistingSessionDataLoader({
       if (!res.ok) throw new Error('Voice prompt failed');
       return res.json() as Promise<VoicePromptResult>;
     },
-    [api, sessionId],
+    [api, sessionId]
   );
 
   const handleAbort = useCallback(async () => {
@@ -731,17 +730,14 @@ export function NewSessionContent({
           .from({ projects: db.collections.projects })
           .where(({ projects }) => eq(projects.id, projectId))
       }
-      deps={[projectId]}
-    >
+      deps={[projectId]}>
       {({ data: projectResults, isLoading }) => {
         if (isLoading || !projectResults || projectResults.length === 0) {
           return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
         }
 
         // Build a set of backend URLs that host this project
-        const backendUrlsWithProject = new Set(
-          projectResults.map((p) => p.backendUrl),
-        );
+        const backendUrlsWithProject = new Set(projectResults.map((p) => p.backendUrl));
 
         // Build BackendOption[] for all backends that host the project
         const backendOptions: BackendOption[] = settings.backends
@@ -753,23 +749,18 @@ export function NewSessionContent({
           }));
 
         // Default to the first connected backend if no selection yet
-        const connectedOptions = backendOptions.filter(
-          (o) => o.connection?.status === 'connected',
-        );
+        const connectedOptions = backendOptions.filter((o) => o.connection?.status === 'connected');
         const effectiveUrl =
-          selectedBackendUrl &&
-          connectedOptions.some((o) => o.config.url === selectedBackendUrl)
+          selectedBackendUrl && connectedOptions.some((o) => o.config.url === selectedBackendUrl)
             ? selectedBackendUrl
-            : connectedOptions[0]?.config.url ?? null;
+            : (connectedOptions[0]?.config.url ?? null);
 
         if (!effectiveUrl) {
           return <SessionLoading onMenuPress={onMenuPress} onProjectsPress={onProjectsPress} />;
         }
 
         // Look up the worktree from the matching project result
-        const matchingProject = projectResults.find(
-          (p) => p.backendUrl === effectiveUrl,
-        );
+        const matchingProject = projectResults.find((p) => p.backendUrl === effectiveUrl);
 
         return (
           <NewSessionDataLoader
@@ -851,19 +842,22 @@ function NewSessionDataLoader({
       creatingRef.current = true;
 
       try {
-        const res = await api.api.projects[':projectId'].sessions.$post({
+        const body = {
           param: { projectId },
           json: {
             parts,
             ...(model ? { model } : {}),
             ...(useWorktree ? { useWorktree: true } : {}),
           } as any,
-        });
+        };
+        console.log('create session body', body);
+        const res = await api.api.projects[':projectId'].sessions.$post(body);
         if (!res.ok) throw new Error('Create session failed');
         const data = (await res.json()) as { sessionId: string };
         onSessionCreated(data.sessionId, projectId, backendUrl);
       } catch (err) {
-        console.error('[NewSessionContent] createSessionWithPrompt failed:', err);
+        const message = err instanceof Error ? err.message : 'Failed to create session';
+        Alert.alert('Session Creation Failed', message);
       } finally {
         creatingRef.current = false;
       }
@@ -912,7 +906,9 @@ function NewSessionDataLoader({
             className="mt-4 flex-row items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 dark:bg-stone-900">
             <View
               className={`h-4 w-4 rounded border ${
-                useWorktree ? 'border-blue-500 bg-blue-500' : 'border-stone-400 dark:border-stone-600'
+                useWorktree
+                  ? 'border-blue-500 bg-blue-500'
+                  : 'border-stone-400 dark:border-stone-600'
               }`}
             />
             <Text className="text-sm text-stone-500 dark:text-stone-400">Run in worktree</Text>
