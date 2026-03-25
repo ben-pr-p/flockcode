@@ -5,9 +5,11 @@ import { customAlphabet } from "nanoid"
 import { base } from "./base"
 import { sendPrompt } from "../prompt"
 import { WorktreeDriver } from "../worktree"
+import { generateWorktreeSlug } from "../worktree-name"
+import { transcribeAudio } from "../transcribe"
 import type { Session } from "../types"
 
-const generateWorktreeId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 6)
+const generateWorktreeId = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 4)
 
 export const projects = {
   /**
@@ -44,7 +46,24 @@ export const projects = {
 
       if (useWorktree) {
         try {
-          const worktreeId = generateWorktreeId()
+          // Extract text from prompt parts — transcribe audio if needed
+          let promptText = parts
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join(" ")
+            .trim()
+
+          if (!promptText) {
+            const audioPart = parts.find(
+              (p): p is { type: "audio"; audioData: string; mimeType?: string } => p.type === "audio"
+            )
+            if (audioPart) {
+              promptText = await transcribeAudio(audioPart.audioData, audioPart.mimeType ?? "audio/aac")
+            }
+          }
+
+          const slug = await generateWorktreeSlug(promptText)
+          const worktreeId = `${generateWorktreeId()}-${slug}`
           const projectName = basename(project.worktree)
           // Place worktrees at ../worktrees/<project-name>/<id> relative to project root
           const targetPath = resolve(project.worktree, "..", "worktrees", projectName, worktreeId)
