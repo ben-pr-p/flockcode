@@ -70,11 +70,9 @@ export function DiffWebView({ sessionId, backendUrl, activeFile }: DiffWebViewPr
     if (lastFetchedSessionRef.current === cacheKey) return
     lastFetchedSessionRef.current = cacheKey
 
-    api.api.diffs
-      .$get({ query: { session: sessionId } })
-      .then(async (res: Response) => {
-        if (!res.ok) return
-        const fetchedDiffs = await res.json()
+    api.diffs
+      .list({ session: sessionId })
+      .then((fetchedDiffs) => {
         setDiffs(fetchedDiffs as Array<{ file: string; before: string; after: string }>)
       })
       .catch((err: unknown) => {

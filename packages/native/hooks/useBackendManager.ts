@@ -1,9 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { loadable } from 'jotai/utils';
-import { hc } from 'hono/client';
 import { createStreamDB } from '@durable-streams/state';
-import type { AppType } from '../../server/src/app';
 import {
   backendsAtom,
   backendConnectionsAtom,
@@ -13,7 +11,7 @@ import {
 } from '../state/backends';
 import { backendResourcesAtom, type BackendResources } from '../lib/backend-streams';
 import { stateSchema, appStateSchema, type StateDB, type AppStateDB } from '../lib/stream-db';
-import type { ApiClient } from '../lib/api';
+import { createApiClient, type ApiClient } from '../lib/api';
 
 const POLL_INTERVAL = 10_000;
 
@@ -27,26 +25,7 @@ interface PerBackendState {
   cancelled: boolean;
 }
 
-/**
- * Creates an authenticated Hono RPC client for a backend.
- * If authToken is provided, injects the Authorization header on every request.
- */
-function createApiClient(url: string, authToken?: string): ApiClient {
-  const cleanUrl = url.replace(/\/$/, '');
-  if (authToken) {
-    return hc<AppType>(cleanUrl, {
-      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-        fetch(input, {
-          ...init,
-          headers: {
-            ...(init?.headers as Record<string, string>),
-            Authorization: `Bearer ${authToken}`,
-          },
-        }),
-    });
-  }
-  return hc<AppType>(cleanUrl);
-}
+// createApiClient is now imported from '../lib/api'
 
 /**
  * Creates a StateDB connected to a backend's ephemeral stream.
@@ -88,7 +67,7 @@ const backendsLoadableAtom = loadable(backendsAtom);
  * Responsibilities per enabled backend:
  * 1. Poll GET /health every 10s — returns instanceId + health status
  * 2. Detect instanceId changes (server restart) -> tear down and recreate StreamDBs
- * 3. Create hc<AppType>(url) API client (with auth header if authToken is set)
+ * 3. Create oRPC API client (with auth header if authToken is set)
  * 4. Create ephemeral StreamDB at ${url}/${instanceId}
  * 5. Create persistent StreamDB at ${url}/app
  * 6. Write results to backendConnectionsAtom and backendResourcesAtom
