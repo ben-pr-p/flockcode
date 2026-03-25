@@ -84,7 +84,7 @@ export const projects = {
 
       // Create the session in the chosen directory
       const createRes = await context.client.session.create({
-        query: { directory },
+        directory,
       })
       if (createRes.error) {
         throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -148,7 +148,7 @@ export const projects = {
       // Query sessions for each directory in parallel
       const results = await Promise.all(
         directories.map(async (dir) => {
-          const res = await context.client.session.list({ query: { directory: dir } })
+          const res = await context.client.session.list({ directory: dir })
           return ((res.data ?? []) as Session[])
         })
       )

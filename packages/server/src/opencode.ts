@@ -2,28 +2,14 @@
 
 import {
   createOpencodeClient,
-  Event as OpencodeEvent,
-} from "@opencode-ai/sdk"
+  type Event as OpencodeEvent,
+} from "@opencode-ai/sdk/v2"
 import type {
   Message,
   MessagePart,
 } from "./types"
 
 export type { OpencodeEvent }
-
-/**
- * Event shape emitted by the server but not exported from v1 SDK types.
- */
-export type EventMessagePartDelta = {
-  type: "message.part.delta"
-  properties: {
-    sessionID: string
-    messageID: string
-    partID: string
-    field: string
-    delta: string
-  }
-}
 
 export type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
@@ -106,7 +92,7 @@ export function mapMessage(raw: any): Message {
 }
 
 /** Callback signature for receiving Opencode events. */
-export type OpencodeEventCallback = (event: OpencodeEvent | EventMessagePartDelta) => void
+export type OpencodeEventCallback = (event: OpencodeEvent) => void
 
 export class Opencode {
   #client: OpencodeClient
@@ -179,14 +165,14 @@ export type StateStreamSink = {
   messagePartUpdated(part: any): void
   messagePartDelta(messageId: string, partId: string, field: string, delta: string): void
   messagePartRemoved(sessionId: string, messageId: string, partId: string): void
-  permissionUpdated(permission: any): void
-  permissionReplied(sessionId: string, permissionId: string, response: string): void
+  permissionAsked(permission: any): void
+  permissionReplied(sessionId: string, requestId: string, reply: string): void
   todoUpdated(sessionId: string, todos: any[]): void
   commandExecuted(sessionId: string, name: string, args: string, messageId: string): void
 }
 
 export function handleOpencodeEvent(
-  event: OpencodeEvent | EventMessagePartDelta,
+  event: OpencodeEvent,
   sink: StateStreamSink,
 ): void {
   switch (event.type) {
@@ -232,13 +218,13 @@ export function handleOpencodeEvent(
       )
 
     // --- Permissions ---
-    case "permission.updated":
-      return sink.permissionUpdated(event.properties)
+    case "permission.asked":
+      return sink.permissionAsked(event.properties)
     case "permission.replied":
       return sink.permissionReplied(
         event.properties.sessionID,
-        event.properties.permissionID,
-        event.properties.response,
+        event.properties.requestID,
+        event.properties.reply,
       )
 
     // --- Todos & commands ---
@@ -255,8 +241,10 @@ export function handleOpencodeEvent(
     // --- Non-session events (no-ops for state stream) ---
     case "server.instance.disposed":
     case "server.connected":
+    case "global.disposed":
     case "installation.updated":
     case "installation.update-available":
+    case "project.updated":
     case "lsp.client.diagnostics":
     case "lsp.updated":
     case "file.edited":
@@ -265,10 +253,18 @@ export function handleOpencodeEvent(
     case "tui.prompt.append":
     case "tui.command.execute":
     case "tui.toast.show":
+    case "tui.session.select":
+    case "mcp.tools.changed":
+    case "mcp.browser.open.failed":
     case "pty.created":
     case "pty.updated":
     case "pty.exited":
     case "pty.deleted":
+    case "question.asked":
+    case "question.replied":
+    case "question.rejected":
+    case "worktree.ready":
+    case "worktree.failed":
       return
 
     default: {

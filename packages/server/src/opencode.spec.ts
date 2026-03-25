@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 import { RawMessageSchema, MessagePartSchema, MessageInfoSchema } from "./types"
 
 const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
@@ -16,7 +16,7 @@ describe("Zod schema validation against live API", () => {
     const errors: string[] = []
 
     for (const s of sessions.slice(0, 10)) {
-      const res = await client.session.messages({ path: { id: s.id } })
+      const res = await client.session.messages({ sessionID: s.id })
       if (!res.data) continue
 
       for (const msg of res.data as any[]) {
@@ -65,7 +65,7 @@ describe("Zod schema validation against live API", () => {
     const failures: string[] = []
 
     for (const s of sessions.slice(0, 10)) {
-      const res = await client.session.messages({ path: { id: s.id } })
+      const res = await client.session.messages({ sessionID: s.id })
       if (!res.data) continue
 
       for (const msg of res.data as any[]) {
@@ -103,7 +103,7 @@ describe("Zod schema validation against live API", () => {
     const failures: string[] = []
 
     for (const s of sessions.slice(0, 10)) {
-      const res = await client.session.messages({ path: { id: s.id } })
+      const res = await client.session.messages({ sessionID: s.id })
       if (!res.data) continue
 
       for (const msg of res.data as any[]) {

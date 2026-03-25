@@ -27,7 +27,7 @@ export async function sendPrompt(
   const hasAudio = parts.some((p) => p.type === "audio")
   if (hasAudio) {
     try {
-      const res = await client.session.messages({ path: { id: sessionId }, query: { directory } })
+      const res = await client.session.messages({ sessionID: sessionId, directory })
       if (!res.error && res.data) {
         conversationContext = (res.data as any[]).map(mapMessage)
       }
@@ -71,17 +71,15 @@ export async function sendPrompt(
   console.log(`[prompt] session=${sessionId} forwarding to opencode: ${textParts.length} part(s), text preview: "${resolvedText.slice(0, 200)}"`)
 
   const res = await client.session.promptAsync({
-    path: { id: sessionId },
-    body: {
-      parts: textParts,
-      // Disable the question tool — our mobile client doesn't support answering
-      // questions yet, and unanswered questions cause the session to hang.
-      // See: https://github.com/ben-pr-p/flockcode/issues/2
-      tools: { question: false },
-      ...(model ? { model } : {}),
-      ...(agent ? { agent } : {}),
-    },
-    query: { directory },
+    sessionID: sessionId,
+    directory,
+    parts: textParts,
+    // Disable the question tool — our mobile client doesn't support answering
+    // questions yet, and unanswered questions cause the session to hang.
+    // See: https://github.com/ben-pr-p/flockcode/issues/2
+    tools: { question: false },
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
   })
   if (res.error) {
     console.error(`[prompt] session=${sessionId} opencode error:`, res.error)

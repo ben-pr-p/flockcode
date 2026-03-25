@@ -8,9 +8,9 @@ export const diffs = {
     .input(z.object({ session: z.string(), file: z.string() }))
     .handler(async ({ input, context }) => {
       const { session: sessionId, file } = input
-      const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-      const directory = (sessionRes.data as any)?.directory as string | undefined
-      const res = await context.client.session.diff({ path: { id: sessionId }, query: { directory } })
+      const sessionRes = await context.client.session.get({ sessionID: sessionId })
+      const directory = sessionRes.data?.directory
+      const res = await context.client.session.diff({ sessionID: sessionId, directory })
       if (res.error) {
         throw new ORPCError("INTERNAL_SERVER_ERROR", {
           message: "Failed to fetch diffs",
@@ -29,9 +29,9 @@ export const diffs = {
   list: base
     .input(z.object({ session: z.string() }))
     .handler(async ({ input, context }) => {
-      const sessionRes = await context.client.session.get({ path: { id: input.session } })
-      const directory = (sessionRes.data as any)?.directory as string | undefined
-      const res = await context.client.session.diff({ path: { id: input.session }, query: { directory } })
+      const sessionRes = await context.client.session.get({ sessionID: input.session })
+      const directory = sessionRes.data?.directory
+      const res = await context.client.session.diff({ sessionID: input.session, directory })
       if (res.error) {
         throw new ORPCError("INTERNAL_SERVER_ERROR", {
           message: "Failed to fetch diffs",
