@@ -7,11 +7,12 @@ import { TabBar } from './TabBar'
 import { ChatThread } from './ChatThread'
 import { ChangesView } from './ChangesView'
 import { VoiceInputArea } from './VoiceInputArea'
-import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue } from '../lib/stream-db'
+import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue, PermissionRequestValue } from '../lib/stream-db'
 import type { RecordingState } from '../hooks/useAudioRecorder'
 import type { PendingCommand } from '../state/settings'
 import type { BackendUrl } from '../state/backends'
 import { useSessionStatus } from '../hooks/useSessionStatus'
+import { PermissionRequestBar } from './PermissionRequestBar'
 
 interface SessionScreenProps {
   sessionId: string
@@ -60,6 +61,8 @@ interface SessionScreenProps {
   onHandsFreeToggle?: () => void
   /** Open the hands-free mode picker (long-press). */
   onHandsFreeLongPress?: () => void
+  /** Pending permission request for this session (replaces voice input when set). */
+  pendingPermission?: PermissionRequestValue | null
 }
 
 export function SessionScreen({
@@ -92,6 +95,7 @@ export function SessionScreen({
   serverSelector,
   onHandsFreeToggle,
   onHandsFreeLongPress,
+  pendingPermission,
 }: SessionScreenProps) {
   const sessionStatus = useSessionStatus(backendUrl, sessionId)
   const insets = useSafeAreaInsets()
@@ -141,32 +145,34 @@ export function SessionScreen({
       )}
 
       {!session.parentID && (
-        <VoiceInputArea
-          textValue={textValue}
-          onTextChange={setTextValue}
-          onSend={() => {
-            const text = textValue.trim()
-            if (!text) return
-            setTextValue('')
-            onSend(text)
-          }}
-          isSending={isSending}
-          onMicPressIn={audioRecorder.startRecording}
-          onMicPressOut={audioRecorder.stopRecording}
-          onAttachPress={() => {}}
-          onStopPress={audioRecorder.cancelRecording}
-          recordingState={audioRecorder.recordingState}
-          modelName={modelName}
-          sessionStatus={sessionStatus}
-          onAbort={onAbort}
-          onModelPress={onModelPress}
-          agentName={agentName}
-          onAgentPress={onAgentPress}
-          pendingCommand={pendingCommand}
-          onClearCommand={onClearCommand}
-          onHandsFreeToggle={onHandsFreeToggle}
-          onHandsFreeLongPress={onHandsFreeLongPress}
-        />
+        pendingPermission
+          ? <PermissionRequestBar permission={pendingPermission} backendUrl={backendUrl} />
+          : <VoiceInputArea
+              textValue={textValue}
+              onTextChange={setTextValue}
+              onSend={() => {
+                const text = textValue.trim()
+                if (!text) return
+                setTextValue('')
+                onSend(text)
+              }}
+              isSending={isSending}
+              onMicPressIn={audioRecorder.startRecording}
+              onMicPressOut={audioRecorder.stopRecording}
+              onAttachPress={() => {}}
+              onStopPress={audioRecorder.cancelRecording}
+              recordingState={audioRecorder.recordingState}
+              modelName={modelName}
+              sessionStatus={sessionStatus}
+              onAbort={onAbort}
+              onModelPress={onModelPress}
+              agentName={agentName}
+              onAgentPress={onAgentPress}
+              pendingCommand={pendingCommand}
+              onClearCommand={onClearCommand}
+              onHandsFreeToggle={onHandsFreeToggle}
+              onHandsFreeLongPress={onHandsFreeLongPress}
+            />
       )}
     </KeyboardAvoidingView>
   )

@@ -1,13 +1,14 @@
 export { StateStream }
 
 import type { DurableStreamServer } from "durable-streams-web-standard"
+import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import type { OpencodeClient, StateStreamSink } from "./opencode"
 import { mapMessage, mapPart } from "./opencode"
 import type { Message, MessagePart, ChangedFile } from "./types"
 import { WorktreeDriver } from "./worktree"
 
 type InstanceEventType = "project" | "session" | "message"
-type EphemeralEventType = "sessionStatus" | "message" | "change" | "worktreeStatus"
+type EphemeralEventType = "sessionStatus" | "message" | "change" | "worktreeStatus" | "permissionRequest"
 
 type StateEvent = {
   type: InstanceEventType | EphemeralEventType
@@ -21,6 +22,15 @@ export type SessionWorktreeMap = Map<string, { worktreePath: string; projectWork
 
 type SessionStatus = "idle" | "busy" | "error"
 
+/** Permission request value emitted to the client via the ephemeral stream. */
+export type PermissionRequestValue = {
+  sessionId: string
+  requestId: string
+  permission: string
+  patterns: string[]
+  description: string
+}
+
 class StateStream implements StateStreamSink {
   #instanceDs: DurableStreamServer
   #ephemeralDs: DurableStreamServer
@@ -28,6 +38,7 @@ class StateStream implements StateStreamSink {
   #messages: Map<string, Message> = new Map()
   #sessionDirectories: Map<string, string> = new Map()
   #sessionStatuses: Map<string, { status: SessionStatus; error?: string }> = new Map()
+  #pendingPermissions: Map<string, PermissionRequestValue> = new Map()
   #lastEmittedSessions: Map<string, any> = new Map()
   #sessionWorktrees: SessionWorktreeMap
 
@@ -167,6 +178,15 @@ class StateStream implements StateStreamSink {
     this.#setSessionStatus(sessionId, "idle")
     this.#fullMessageSync(sessionId)
     this.#refetchChanges(sessionId)
+    // Clear any stale pending permission when the session goes idle
+    if (this.#pendingPermissions.has(sessionId)) {
+      this.#pendingPermissions.delete(sessionId)
+      this.#appendEphemeralEvent({
+        type: "permissionRequest",
+        key: sessionId,
+        headers: { operation: "delete" },
+      })
+    }
     // Full worktree status refresh — commits happen when the session goes idle
     if (this.#sessionWorktrees.has(sessionId)) {
       this.#emitWorktreeStatus(sessionId)
@@ -312,12 +332,31 @@ class StateStream implements StateStreamSink {
     this.#emitMessage(messageId, "ephemeral")
   }
 
-  permissionAsked(_permission: any) {
-    // No-op for now
+  permissionAsked(permission: PermissionRequest) {
+    const sessionId = permission.sessionID
+    const value: PermissionRequestValue = {
+      sessionId,
+      requestId: permission.id,
+      permission: permission.permission,
+      patterns: permission.patterns,
+      description: buildPermissionDescription(permission.permission, permission.patterns),
+    }
+    this.#pendingPermissions.set(sessionId, value)
+    this.#appendEphemeralEvent({
+      type: "permissionRequest",
+      key: sessionId,
+      value,
+      headers: { operation: "upsert" },
+    })
   }
 
-  permissionReplied(_sessionId: string, _requestId: string, _reply: string) {
-    // No-op for now
+  permissionReplied(sessionId: string, _requestId: string, _reply: string) {
+    this.#pendingPermissions.delete(sessionId)
+    this.#appendEphemeralEvent({
+      type: "permissionRequest",
+      key: sessionId,
+      headers: { operation: "delete" },
+    })
   }
 
   todoUpdated(_sessionId: string, _todos: any[]) {
@@ -341,12 +380,14 @@ class StateStream implements StateStreamSink {
     offset: number
     sessionStatuses: Record<string, { status: SessionStatus; error?: string }>
     worktreeStatuses: Record<string, any>
+    pendingPermissions: Record<string, PermissionRequestValue>
   } {
     const { messages } = this.#ephemeralDs.readStream("/")
     return {
       offset: messages.length,
       sessionStatuses: Object.fromEntries(this.#sessionStatuses),
       worktreeStatuses: Object.fromEntries(this.#lastWorktreeStatus),
+      pendingPermissions: Object.fromEntries(this.#pendingPermissions),
     }
   }
 
@@ -617,4 +658,21 @@ const FILE_EDIT_TOOLS = new Set(["edit", "write", "bash", "multi_edit"])
 
 function isFileEditTool(toolName: string): boolean {
   return FILE_EDIT_TOOLS.has(toolName)
+}
+
+/** Build a human-readable description from a permission name and glob patterns. */
+function buildPermissionDescription(permission: string, patterns: string[]): string {
+  const patternSuffix = patterns.length > 0 ? `: ${patterns.join(", ")}` : ""
+  switch (permission) {
+    case "bash":
+      return `Run bash command${patternSuffix}`
+    case "edit":
+      return `Edit files${patternSuffix}`
+    case "write":
+      return `Write files${patternSuffix}`
+    case "read":
+      return `Read files${patternSuffix}`
+    default:
+      return `${permission}${patternSuffix}`
+  }
 }

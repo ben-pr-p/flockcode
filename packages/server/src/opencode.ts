@@ -3,6 +3,7 @@
 import {
   createOpencodeClient,
   type Event as OpencodeEvent,
+  type PermissionRequest,
 } from "@opencode-ai/sdk/v2"
 import type {
   Message,
@@ -165,7 +166,7 @@ export type StateStreamSink = {
   messagePartUpdated(part: any): void
   messagePartDelta(messageId: string, partId: string, field: string, delta: string): void
   messagePartRemoved(sessionId: string, messageId: string, partId: string): void
-  permissionAsked(permission: any): void
+  permissionAsked(permission: PermissionRequest): void
   permissionReplied(sessionId: string, requestId: string, reply: string): void
   todoUpdated(sessionId: string, todos: any[]): void
   commandExecuted(sessionId: string, name: string, args: string, messageId: string): void

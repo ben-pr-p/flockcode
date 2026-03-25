@@ -19,13 +19,14 @@ import { VoiceInputArea } from './VoiceInputArea';
 import { SettingsScreen } from './SettingsScreen';
 import { getToolRenderers, type ToolCallProps } from './tool-calls';
 import { StatusDot, TOOL_LABELS, formatDuration } from './tool-calls/shared';
-import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue } from '../lib/stream-db';
+import type { SessionValue, UIMessage as Message, ChangedFile, WorktreeStatusValue, PermissionRequestValue } from '../lib/stream-db';
 import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
 import type { LeftPanelContent } from '../state/ui';
 import type { RecordingState } from '../hooks/useAudioRecorder';
 import type { PendingCommand } from '../state/settings';
 import type { BackendConfig, BackendConnection, BackendUrl } from '../state/backends';
 import { useSessionStatus } from '../hooks/useSessionStatus';
+import { PermissionRequestBar } from './PermissionRequestBar';
 
 interface SplitLayoutProps {
   sessionId: string;
@@ -77,6 +78,8 @@ interface SplitLayoutProps {
   onHandsFreeToggle?: () => void;
   /** Open the hands-free mode picker (long-press). */
   onHandsFreeLongPress?: () => void;
+  /** Pending permission request for this session (replaces voice input when set). */
+  pendingPermission?: PermissionRequestValue | null;
 }
 
 export function SplitLayout({
@@ -105,6 +108,7 @@ export function SplitLayout({
   onMerge,
   onHandsFreeToggle,
   onHandsFreeLongPress,
+  pendingPermission,
 }: SplitLayoutProps) {
   const sessionStatus = useSessionStatus(backendUrl, sessionId);
   const insets = useSafeAreaInsets();
@@ -230,32 +234,34 @@ export function SplitLayout({
           keyboardVerticalOffset={insets.top + 48 + 32}>
           <ChatThread messages={messages} onToolCallPress={handleToolCallPress} />
           {!session.parentID && (
-            <VoiceInputArea
-              textValue={textValue}
-              onTextChange={setTextValue}
-              onSend={() => {
-                const text = textValue.trim();
-                if (!text) return;
-                setTextValue('');
-                onSend(text);
-              }}
-              isSending={isSending}
-              onMicPressIn={audioRecorder.startRecording}
-              onMicPressOut={audioRecorder.stopRecording}
-              onAttachPress={() => {}}
-              onStopPress={audioRecorder.cancelRecording}
-              recordingState={audioRecorder.recordingState}
-              modelName={modelName}
-              sessionStatus={sessionStatus}
-              onAbort={onAbort}
-              onModelPress={onModelPress}
-              agentName={agentName}
-              onAgentPress={onAgentPress}
-              pendingCommand={pendingCommand}
-              onClearCommand={onClearCommand}
-              onHandsFreeToggle={onHandsFreeToggle}
-              onHandsFreeLongPress={onHandsFreeLongPress}
-            />
+            pendingPermission
+              ? <PermissionRequestBar permission={pendingPermission} backendUrl={backendUrl} />
+              : <VoiceInputArea
+                  textValue={textValue}
+                  onTextChange={setTextValue}
+                  onSend={() => {
+                    const text = textValue.trim();
+                    if (!text) return;
+                    setTextValue('');
+                    onSend(text);
+                  }}
+                  isSending={isSending}
+                  onMicPressIn={audioRecorder.startRecording}
+                  onMicPressOut={audioRecorder.stopRecording}
+                  onAttachPress={() => {}}
+                  onStopPress={audioRecorder.cancelRecording}
+                  recordingState={audioRecorder.recordingState}
+                  modelName={modelName}
+                  sessionStatus={sessionStatus}
+                  onAbort={onAbort}
+                  onModelPress={onModelPress}
+                  agentName={agentName}
+                  onAgentPress={onAgentPress}
+                  pendingCommand={pendingCommand}
+                  onClearCommand={onClearCommand}
+                  onHandsFreeToggle={onHandsFreeToggle}
+                  onHandsFreeLongPress={onHandsFreeLongPress}
+                />
           )}
         </KeyboardAvoidingView>
       </View>

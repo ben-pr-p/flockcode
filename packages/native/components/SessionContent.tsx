@@ -25,6 +25,7 @@ import { backendResourcesAtom } from '../lib/backend-streams';
 import { useBackendStateQuery, useBackendEphemeralStateQuery } from '../lib/merged-query';
 import { MergedStateQuery, type WithBackendUrl } from '../lib/merged-query';
 import { useSessionStatus } from '../hooks/useSessionStatus';
+import { usePendingPermission } from '../hooks/usePendingPermission';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useHandsFreeMode } from '../hooks/useHandsFreeMode';
 import { useModels } from '../hooks/useModels';
@@ -109,6 +110,7 @@ export function SessionView({
   serverSelector,
 }: SessionViewProps) {
   const sessionStatus = useSessionStatus(backendUrl, sessionId);
+  const pendingPermission = usePendingPermission(backendUrl, sessionId);
   const [activeTab, setActiveTab] = useState<'session' | 'changes'>('session');
   const [isSending, setIsSending] = useState(false);
   const [pendingVoiceMessages, setPendingVoiceMessages] = useState<Message[]>([]);
@@ -408,6 +410,7 @@ export function SessionView({
           onMerge={handleMerge}
           onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
           onHandsFreeLongPress={() => setModePickerVisible(true)}
+          pendingPermission={pendingPermission}
         />
         {modelSheet}
         {agentCommandSheet}
@@ -452,6 +455,7 @@ export function SessionView({
         serverSelector={serverSelector}
         onHandsFreeToggle={handsFree.isHandsFreeAvailable ? handsFree.toggle : undefined}
         onHandsFreeLongPress={() => setModePickerVisible(true)}
+        pendingPermission={pendingPermission}
       />
       {modelSheet}
       {agentCommandSheet}

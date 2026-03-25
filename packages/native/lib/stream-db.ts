@@ -10,6 +10,7 @@ export type {
   SessionStatusValue,
   ChangeValue,
   WorktreeStatusValue,
+  PermissionRequestValue,
   SessionMetaValue,
   StateDB,
   EphemeralStateDB,
@@ -78,6 +79,14 @@ type WorktreeStatusValue = {
   error?: string;
 };
 
+type PermissionRequestValue = {
+  sessionId: string;
+  requestId: string;
+  permission: string;
+  patterns: string[];
+  description: string;
+};
+
 const stateDef = {
   projects: {
     schema: passthrough<ProjectValue>(),
@@ -118,6 +127,11 @@ const ephemeralStateDef = {
   worktreeStatuses: {
     schema: passthrough<WorktreeStatusValue>(),
     type: 'worktreeStatus' as const,
+    primaryKey: 'sessionId' as const,
+  },
+  permissionRequests: {
+    schema: passthrough<PermissionRequestValue>(),
+    type: 'permissionRequest' as const,
     primaryKey: 'sessionId' as const,
   },
 };
