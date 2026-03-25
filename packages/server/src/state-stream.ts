@@ -78,11 +78,11 @@ class StateStream implements StateStreamSink {
     // Load sessions for each directory in parallel
     const projectSessions = await Promise.all(
       allDirectories.map(async (directory) => {
-        const res = await this.#client.session.list({ query: { directory } })
+         const res = await this.#client.session.list({ directory })
 
         for (const session of res.data ?? []) {
-          if ((session as any).directory) {
-            this.#sessionDirectories.set(session.id, (session as any).directory)
+          if (session.directory) {
+            this.#sessionDirectories.set(session.id, session.directory)
           }
           this.#emitSession(session.id, mapSession(session), "insert")
         }
@@ -94,7 +94,7 @@ class StateStream implements StateStreamSink {
 
     // Load all messages for each session
     for (const session of sessions ?? []) {
-      const msgs = await this.#client.session.messages({ path: { id: session.id }, query: { directory: (session as any).directory } })
+      const msgs = await this.#client.session.messages({ sessionID: session.id, directory: session.directory })
       for (const raw of msgs.data ?? []) {
         const msg = mapMessage(raw)
         this.#messages.set(msg.id, msg)
@@ -112,7 +112,7 @@ class StateStream implements StateStreamSink {
     // directories that aren't already tracked (e.g. app state stream was lost
     // or the session was created while the server was down).
     for (const session of sessions ?? []) {
-      const dir = (session as any).directory as string | undefined
+      const dir = session.directory
       if (dir && !this.#sessionWorktrees.has(session.id) && worktreePathToProject.has(dir)) {
         this.#sessionWorktrees.set(session.id, {
           worktreePath: dir,
@@ -123,7 +123,7 @@ class StateStream implements StateStreamSink {
 
     // Load file changes for sessions that have diffs
     for (const session of sessions ?? []) {
-      if ((session as any).summary?.files > 0) {
+      if (session.summary?.files && session.summary.files > 0) {
         this.#refetchChanges(session.id)
       }
     }
@@ -312,11 +312,11 @@ class StateStream implements StateStreamSink {
     this.#emitMessage(messageId, "ephemeral")
   }
 
-  permissionUpdated(_permission: any) {
+  permissionAsked(_permission: any) {
     // No-op for now
   }
 
-  permissionReplied(_sessionId: string, _permissionId: string, _response: string) {
+  permissionReplied(_sessionId: string, _requestId: string, _reply: string) {
     // No-op for now
   }
 
@@ -393,7 +393,7 @@ class StateStream implements StateStreamSink {
   async #fullMessageSync(sessionId: string) {
     try {
       const directory = this.#sessionDirectories.get(sessionId)
-      const res = await this.#client.session.messages({ path: { id: sessionId }, ...(directory ? { query: { directory } } : {}) })
+      const res = await this.#client.session.messages({ sessionID: sessionId, ...(directory ? { directory } : {}) })
       if (res.error) return
       for (const raw of res.data ?? []) {
         const msg = mapMessage(raw)
@@ -423,7 +423,7 @@ class StateStream implements StateStreamSink {
   async #refetchChanges(sessionId: string) {
     try {
       const directory = this.#sessionDirectories.get(sessionId)
-      const res = await this.#client.session.diff({ path: { id: sessionId }, ...(directory ? { query: { directory } } : {}) })
+      const res = await this.#client.session.diff({ sessionID: sessionId, ...(directory ? { directory } : {}) })
       if (res.error) return
       // Finalized changes go to the ephemeral stream — only the latest matters
       this.#appendEphemeralEvent({

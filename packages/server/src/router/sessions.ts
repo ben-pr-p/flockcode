@@ -26,8 +26,8 @@ export const sessions = {
     .handler(async ({ input, context }) => {
       const { sessionId, parts, model, agent, lineReference } = input
       try {
-        const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-        const directory = (sessionRes.data as any)?.directory as string | undefined
+        const sessionRes = await context.client.session.get({ sessionID: sessionId })
+        const directory = sessionRes.data?.directory
         await sendPrompt(context.client, sessionId, parts, directory, model, agent, lineReference)
         return { success: true as const }
       } catch (err: any) {
@@ -44,11 +44,11 @@ export const sessions = {
     .handler(async ({ input, context }) => {
       const { sessionId } = input
       try {
-        const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-        const directory = (sessionRes.data as any)?.directory as string | undefined
+        const sessionRes = await context.client.session.get({ sessionID: sessionId })
+        const directory = sessionRes.data?.directory
         const res = await context.client.session.abort({
-          path: { id: sessionId },
-          ...(directory ? { query: { directory } } : {}),
+          sessionID: sessionId,
+          ...(directory ? { directory } : {}),
         })
         if (res.error) {
           throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -71,12 +71,12 @@ export const sessions = {
     .handler(async ({ input, context }) => {
       const { sessionId } = input
       try {
-        const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-        const directory = (sessionRes.data as any)?.directory as string | undefined
+        const sessionRes = await context.client.session.get({ sessionID: sessionId })
+        const directory = sessionRes.data?.directory
 
         const res = await context.client.session.delete({
-          path: { id: sessionId },
-          ...(directory ? { query: { directory } } : {}),
+          sessionID: sessionId,
+          ...(directory ? { directory } : {}),
         })
         if (res.error) {
           throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -123,17 +123,15 @@ export const sessions = {
     .handler(async ({ input, context }) => {
       const { sessionId, command, arguments: args, agent, model } = input
       try {
-        const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-        const directory = (sessionRes.data as any)?.directory as string | undefined
-        const res = await (context.client.session as any).command({
-          path: { id: sessionId },
-          body: {
-            command,
-            arguments: args,
-            ...(agent ? { agent } : {}),
-            ...(model ? { model: `${model.providerID}/${model.modelID}` } : {}),
-          },
-          query: { directory },
+        const sessionRes = await context.client.session.get({ sessionID: sessionId })
+        const directory = sessionRes.data?.directory
+        const res = await context.client.session.command({
+          sessionID: sessionId,
+          directory,
+          command,
+          arguments: args,
+          ...(agent ? { agent } : {}),
+          ...(model ? { model: `${model.providerID}/${model.modelID}` } : {}),
         })
         if (res.error) {
           throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -161,8 +159,8 @@ export const sessions = {
     .handler(async ({ input, context }) => {
       const { sessionId, audioData, mimeType, model } = input
       try {
-        const sessionRes = await context.client.session.get({ path: { id: sessionId } })
-        const directory = (sessionRes.data as any)?.directory as string | undefined
+        const sessionRes = await context.client.session.get({ sessionID: sessionId })
+        const directory = sessionRes.data?.directory
         return await handleVoicePrompt(
           context.client,
           sessionId,

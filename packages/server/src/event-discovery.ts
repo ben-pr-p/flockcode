@@ -5,7 +5,7 @@
 //
 // Requires: opencode server running on localhost:4096
 
-import { createOpencodeClient, type Event as OpencodeEvent } from "@opencode-ai/sdk"
+import { createOpencodeClient, type Event as OpencodeEvent } from "@opencode-ai/sdk/v2"
 import { mapMessage } from "./opencode"
 
 const client = createOpencodeClient({ baseUrl: "http://localhost:4096" })
@@ -102,8 +102,8 @@ async function runPrompt(sessionId: string, text: string) {
   console.log(`${"=".repeat(70)}\n`)
 
   const res = await client.session.prompt({
-    path: { id: sessionId },
-    body: { parts: [{ type: "text", text }] },
+    sessionID: sessionId,
+    parts: [{ type: "text", text }],
   })
   if (res.error) {
     console.error("Prompt error:", res.error)
@@ -113,13 +113,13 @@ async function runPrompt(sessionId: string, text: string) {
 }
 
 async function fetchMessages(sessionId: string) {
-  const res = await client.session.messages({ path: { id: sessionId } })
+  const res = await client.session.messages({ sessionID: sessionId })
   if (res.error) throw new Error("Failed to fetch messages")
   return (res.data ?? []).map(mapMessage)
 }
 
 async function fetchDiffs(sessionId: string) {
-  const res = await client.session.diff({ path: { id: sessionId } })
+  const res = await client.session.diff({ sessionID: sessionId })
   if (res.error) throw new Error("Failed to fetch diffs")
   return res.data ?? []
 }
@@ -221,7 +221,7 @@ async function main() {
   // Create a fresh session
   console.log("Creating session...")
   const createRes = await client.session.create({
-    body: { title: "event-discovery-test" },
+    title: "event-discovery-test",
   })
   if (createRes.error || !createRes.data) {
     console.error("Failed to create session:", createRes.error)

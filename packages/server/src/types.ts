@@ -4,7 +4,7 @@ import { z } from "zod/v4"
  * Re-export SDK types so the native package can import them without
  * depending on @opencode-ai/sdk directly.
  */
-export type { Project, Session, File } from "@opencode-ai/sdk"
+export type { Project, Session, File } from "@opencode-ai/sdk/v2"
 
 export interface ChangedFile {
   path: string

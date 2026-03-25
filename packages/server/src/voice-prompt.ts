@@ -40,9 +40,9 @@ export async function handleVoicePrompt(
   // 1. Fetch conversation context
   let conversationContext: Message[] | undefined
   try {
-    const res = await client.session.messages({ path: { id: sessionId }, query: { directory } })
+    const res = await client.session.messages({ sessionID: sessionId, directory })
     if (!res.error && res.data) {
-      conversationContext = (res.data as any[]).map(mapMessage)
+      conversationContext = res.data.map(mapMessage)
     }
   } catch {}
 

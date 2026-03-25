@@ -12,7 +12,7 @@ import { createHash } from "node:crypto"
 import { ExecError } from "@fly/sprites"
 import type { SpriteClient } from "./sprites"
 import type { OpencodeClient } from "./opencode"
-import type { Project } from "@opencode-ai/sdk"
+import type { Project } from "@opencode-ai/sdk/v2"
 
 // ---------------------------------------------------------------------------
 // Types
