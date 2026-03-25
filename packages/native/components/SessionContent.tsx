@@ -151,22 +151,17 @@ export function SessionView({
     if (!api) return;
     setIsMerging(true);
     try {
-      const res = await (api.api.sessions[':sessionId'].merge as any).$post({
-        param: { sessionId },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.conflictingFiles?.length > 0) {
-          Alert.alert(
-            'Merge Conflict',
-            `Conflicts in:\n${data.conflictingFiles.join('\n')}\n\nAsk the agent to rebase onto main and resolve the conflicts, then try again.`
-          );
-        } else {
-          Alert.alert('Merge Failed', data.reason ?? data.error ?? 'Unknown error');
-        }
-      }
+      await api.sessions.merge({ sessionId });
     } catch (err: any) {
-      Alert.alert('Merge Failed', err.message ?? 'Unknown error');
+      const data = err.data;
+      if (data?.conflictingFiles?.length > 0) {
+        Alert.alert(
+          'Merge Conflict',
+          `Conflicts in:\n${data.conflictingFiles.join('\n')}\n\nAsk the agent to rebase onto main and resolve the conflicts, then try again.`
+        );
+      } else {
+        Alert.alert('Merge Failed', data?.reason ?? err.message ?? 'Unknown error');
+      }
     } finally {
       setIsMerging(false);
     }
@@ -588,16 +583,13 @@ function ExistingSessionDataLoader({
     async (text: string, model: ModelSelection | null, agent?: string) => {
       if (!api) return;
       const currentSelection = lineSelectionRef.current;
-      const res = await api.api.sessions[':sessionId'].prompt.$post({
-        param: { sessionId },
-        json: {
-          parts: [{ type: 'text' as const, text }],
-          ...(model ? { model } : {}),
-          ...(agent ? { agent } : {}),
-          ...(currentSelection ? { lineReference: currentSelection } : {}),
-        },
+      await api.sessions.prompt({
+        sessionId,
+        parts: [{ type: 'text' as const, text }],
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+        ...(currentSelection ? { lineReference: currentSelection } : {}),
       });
-      if (!res.ok) throw new Error('Prompt failed');
       // Clear line selection after successful send
       if (currentSelection) setLineSelection(null);
     },
@@ -608,15 +600,12 @@ function ExistingSessionDataLoader({
     (base64: string, mimeType: string, model: ModelSelection | null) => {
       if (!api) return;
       const currentSelection = lineSelectionRef.current;
-      api.api.sessions[':sessionId'].prompt
-        .$post({
-          param: { sessionId },
-          json: {
-            parts: [{ type: 'audio' as const, audioData: base64, mimeType }],
-            ...(model ? { model } : {}),
-            ...(currentSelection ? { lineReference: currentSelection } : {}),
-          },
-        })
+      api.sessions.prompt({
+        sessionId,
+        parts: [{ type: 'audio' as const, audioData: base64, mimeType }],
+        ...(model ? { model } : {}),
+        ...(currentSelection ? { lineReference: currentSelection } : {}),
+      })
         .then(() => {
           // Clear line selection after successful send
           if (currentSelection) setLineSelection(null);
@@ -631,15 +620,12 @@ function ExistingSessionDataLoader({
   const handleExecuteCommand = useCallback(
     async (command: string, args: string, model: ModelSelection | null) => {
       if (!api) throw new Error('Not connected');
-      const res = await (api.api.sessions[':sessionId'].command as any).$post({
-        param: { sessionId },
-        json: {
-          command,
-          arguments: args,
-          ...(model ? { model } : {}),
-        },
+      await api.sessions.command({
+        sessionId,
+        command,
+        arguments: args,
+        ...(model ? { model } : {}),
       });
-      if (!res.ok) throw new Error('Command failed');
     },
     [api, sessionId]
   );
@@ -651,16 +637,12 @@ function ExistingSessionDataLoader({
       model: ModelSelection | null
     ): Promise<VoicePromptResult> => {
       if (!api) throw new Error('Not connected');
-      const res = await (api.api.sessions[':sessionId']['voice-prompt'] as any).$post({
-        param: { sessionId },
-        json: {
-          audioData: base64,
-          mimeType,
-          ...(model ? { model } : {}),
-        },
+      return await api.sessions.voicePrompt({
+        sessionId,
+        audioData: base64,
+        mimeType,
+        ...(model ? { model } : {}),
       });
-      if (!res.ok) throw new Error('Voice prompt failed');
-      return res.json() as Promise<VoicePromptResult>;
     },
     [api, sessionId]
   );
@@ -668,10 +650,7 @@ function ExistingSessionDataLoader({
   const handleAbort = useCallback(async () => {
     if (!api) return;
     try {
-      const res = await (api.api.sessions[':sessionId'].abort as any).$post({
-        param: { sessionId },
-      });
-      if (!res.ok) console.error('[SessionContent] abort failed');
+      await api.sessions.abort({ sessionId });
     } catch (err) {
       console.error('[SessionContent] abort failed:', err);
     }
@@ -842,18 +821,14 @@ function NewSessionDataLoader({
       creatingRef.current = true;
 
       try {
-        const body = {
-          param: { projectId },
-          json: {
-            parts,
-            ...(model ? { model } : {}),
-            ...(useWorktree ? { useWorktree: true } : {}),
-          } as any,
+        const input = {
+          projectId,
+          parts,
+          ...(model ? { model } : {}),
+          ...(useWorktree ? { useWorktree: true } : {}),
         };
-        console.log('create session body', body);
-        const res = await api.api.projects[':projectId'].sessions.$post(body);
-        if (!res.ok) throw new Error('Create session failed');
-        const data = (await res.json()) as { sessionId: string };
+        console.log('create session input', input);
+        const data = await api.projects.createSession(input);
         onSessionCreated(data.sessionId, projectId, backendUrl);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to create session';

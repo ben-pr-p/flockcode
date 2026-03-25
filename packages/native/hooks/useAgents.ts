@@ -20,38 +20,14 @@ export function useAgents(backendUrl: BackendUrl) {
   const fetchAgents = useCallback(async () => {
     if (!api) return;
     try {
-      const res = await (api.api as any).agents.$get();
-      if (!res.ok) return;
-      const data = await res.json();
+      const agents = await api.agents.list();
 
-      // The server returns an object keyed by agent name, each value has
-      // name, description, mode, color, etc.
-      const agents: AgentInfo[] = [];
-      if (data && typeof data === 'object') {
-        // Handle both array and object (keyed by name) response shapes
-        if (Array.isArray(data)) {
-          for (const agent of data) {
-            agents.push({
-              name: agent.name ?? '',
-              description: agent.description,
-              mode: agent.mode ?? 'primary',
-              color: agent.color,
-            });
-          }
-        } else {
-          for (const [key, value] of Object.entries(data)) {
-            const agent = value as any;
-            agents.push({
-              name: agent.name ?? key,
-              description: agent.description,
-              mode: agent.mode ?? 'primary',
-              color: agent.color,
-            });
-          }
-        }
-      }
-
-      setCatalog(agents);
+      setCatalog(agents.map((a) => ({
+        name: a.name,
+        description: a.description,
+        mode: (a.mode as AgentInfo['mode']) ?? 'primary',
+        color: a.color,
+      })));
     } catch (err) {
       console.error('[useAgents] Failed to fetch agent catalog:', err);
     }

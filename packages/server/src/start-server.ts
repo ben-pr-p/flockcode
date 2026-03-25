@@ -22,7 +22,7 @@ export interface StartServerOptions {
  */
 export async function startServer(options: StartServerOptions) {
   const { opencodeUrl, port } = options
-  const { app, routes, ds, appDs, stateStream, instanceId } = await createApp(opencodeUrl)
+  const { app, ds, appDs, stateStream, instanceId } = await createApp(opencodeUrl)
 
   console.log(`Server starting on port ${port} (opencode: ${opencodeUrl})`)
 

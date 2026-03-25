@@ -477,13 +477,7 @@ function SessionListContent({
       const api = getApi(backendUrl);
       if (!api) return;
       try {
-        const res = await api.api.sessions[':sessionId'].$delete({
-          param: { sessionId: sid },
-        });
-        if (!res.ok) {
-          Alert.alert('Error', 'Failed to delete session.');
-          return;
-        }
+        await api.sessions.delete({ sessionId: sid });
         if (sid === params.sessionId && params.projectId) {
           router.push({
             pathname: '/projects/[projectId]/new-session',
@@ -542,17 +536,13 @@ function SessionListContent({
   const archiveSession = useCallback(async (sessionId: string, backendUrl: BackendUrl) => {
     const api = getApi(backendUrl);
     if (!api) return;
-    await api.api.sessions[':sessionId'].archive.$post({
-      param: { sessionId },
-    });
+    await api.sessions.archive({ sessionId });
   }, [getApi]);
 
   const unarchiveSession = useCallback(async (sessionId: string, backendUrl: BackendUrl) => {
     const api = getApi(backendUrl);
     if (!api) return;
-    await api.api.sessions[':sessionId'].unarchive.$post({
-      param: { sessionId },
-    });
+    await api.sessions.unarchive({ sessionId });
   }, [getApi]);
 
   const worktreeStatusBySession = useMemo(() => {
