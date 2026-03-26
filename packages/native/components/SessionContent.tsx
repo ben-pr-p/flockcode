@@ -627,8 +627,8 @@ function ExistingSessionDataLoader({
     backendUrl,
     (db, q) =>
       q
-        .from({ messages: db.collections.messages })
-        .where(({ messages }) => eq(messages.sessionId, sessionId)),
+        .from({ pendingMessages: db.collections.pendingMessages })
+        .where(({ pendingMessages }) => eq(pendingMessages.sessionId, sessionId)),
     [sessionId]
   );
 

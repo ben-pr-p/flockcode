@@ -1,14 +1,13 @@
 import { atom } from 'jotai';
 import type { BackendUrl } from '../state/backends';
-import type { StateDB, EphemeralStateDB, AppStateDB } from './stream-db';
+import type { UnifiedDB } from './stream-db';
 import type { ApiClient } from './api';
 
-/** Per-backend resources: StreamDBs + API client. */
+/** Per-backend resources: unified DB + API client. */
 export interface BackendResources {
   url: BackendUrl;
-  db: StateDB | null;
-  ephemeralDb: EphemeralStateDB | null;
-  appDb: AppStateDB | null;
+  /** Single DB containing all collections (state, ephemeral, app) */
+  db: UnifiedDB | null;
   api: ApiClient | null;
   loading: boolean;
 }

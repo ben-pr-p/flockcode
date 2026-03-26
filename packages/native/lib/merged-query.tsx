@@ -1,7 +1,6 @@
 /**
  * MergedQuery — runs the same useLiveQuery against every connected backend's
- * StateDB (or AppStateDB), concatenates the results, and passes them to a
- * render function.
+ * unified DB, concatenates the results, and passes them to a render function.
  *
  * Each result item is augmented with a `backendUrl` field so the caller knows
  * which backend it came from.
@@ -16,16 +15,16 @@ import { useLiveQuery } from '@tanstack/react-db';
 import type { InitialQueryBuilder, QueryBuilder } from '@tanstack/react-db';
 import { backendResourcesAtom, type BackendResources } from './backend-streams';
 import type { BackendUrl } from '../state/backends';
-import type { StateDB, EphemeralStateDB, AppStateDB } from './stream-db';
+import type { UnifiedDB } from './stream-db';
 
 /** Every item returned by a merged query carries its source backend URL. */
 export type WithBackendUrl<T> = T & { backendUrl: BackendUrl };
 
-// --- State query merging ---
+// --- Unified query merging ---
 
-interface MergedStateQueryProps<T> {
-  /** Build a query from a StateDB. Same API as the old useStateQuery's first arg. */
-  query: (db: StateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
+interface MergedQueryProps<T> {
+  /** Build a query from the unified DB. */
+  query: (db: UnifiedDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
   /** Extra deps for the query. */
   deps?: unknown[];
   /** Render function receiving the merged, backend-tagged results. */
@@ -33,18 +32,21 @@ interface MergedStateQueryProps<T> {
 }
 
 /**
- * Runs a StateDB live query against every connected backend, tags each
+ * Runs a live query against every connected backend's unified DB, tags each
  * result with its source `backendUrl`, and concatenates them.
  *
+ * This replaces MergedStateQuery, MergedEphemeralStateQuery, and
+ * MergedAppStateQuery — all collections are in the unified DB.
+ *
  * ```tsx
- * <MergedStateQuery<ProjectValue>
+ * <MergedQuery<ProjectValue>
  *   query={(db, q) => q.from({ projects: db.collections.projects })}
  * >
  *   {({ data, isLoading }) => <ProjectList projects={data} />}
- * </MergedStateQuery>
+ * </MergedQuery>
  * ```
  */
-export function MergedStateQuery<T>({ query, deps = [], children }: MergedStateQueryProps<T>) {
+export function MergedQuery<T>({ query, deps = [], children }: MergedQueryProps<T>) {
   const resourceMap = useAtomValue(backendResourcesAtom);
   const backends = Object.values(resourceMap).filter((r) => r.db != null);
 
@@ -53,7 +55,7 @@ export function MergedStateQuery<T>({ query, deps = [], children }: MergedStateQ
   }
 
   return (
-    <StateQueryAccumulator<T>
+    <QueryAccumulator<T>
       backends={backends}
       index={0}
       accumulated={[]}
@@ -61,21 +63,21 @@ export function MergedStateQuery<T>({ query, deps = [], children }: MergedStateQ
       query={query}
       deps={deps}>
       {children}
-    </StateQueryAccumulator>
+    </QueryAccumulator>
   );
 }
 
-interface StateQueryAccumulatorProps<T> {
+interface QueryAccumulatorProps<T> {
   backends: BackendResources[];
   index: number;
   accumulated: WithBackendUrl<T>[];
   anyLoading: boolean;
-  query: (db: StateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
+  query: (db: UnifiedDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
   deps: unknown[];
   children: (result: { data: WithBackendUrl<T>[] | null; isLoading: boolean }) => React.ReactNode;
 }
 
-function StateQueryAccumulator<T>({
+function QueryAccumulator<T>({
   backends,
   index,
   accumulated,
@@ -83,7 +85,7 @@ function StateQueryAccumulator<T>({
   query,
   deps,
   children,
-}: StateQueryAccumulatorProps<T>) {
+}: QueryAccumulatorProps<T>) {
   const backend = backends[index];
   const db = backend.db!;
 
@@ -95,7 +97,7 @@ function StateQueryAccumulator<T>({
 
   if (index + 1 < backends.length) {
     return (
-      <StateQueryAccumulator<T>
+      <QueryAccumulator<T>
         backends={backends}
         index={index + 1}
         accumulated={merged}
@@ -103,192 +105,36 @@ function StateQueryAccumulator<T>({
         query={query}
         deps={deps}>
         {children}
-      </StateQueryAccumulator>
+      </QueryAccumulator>
     );
   }
 
   return <>{children({ data: merged.length > 0 ? merged : null, isLoading: loading })}</>;
 }
 
-// --- App state query merging ---
+// --- Backwards-compatible aliases ---
+// These re-export MergedQuery under the old names so existing consumers
+// don't need to be updated in this commit. The query callback receives
+// the full UnifiedDB, which is a superset of the old StateDB / EphemeralStateDB / AppStateDB.
 
-interface MergedAppStateQueryProps<T> {
-  query: (db: AppStateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
-  deps?: unknown[];
-  children: (result: { data: WithBackendUrl<T>[] | null; isLoading: boolean }) => React.ReactNode;
-}
+/** @deprecated Use MergedQuery instead */
+export const MergedStateQuery = MergedQuery;
 
-/**
- * Same as MergedStateQuery but for AppStateDB (persistent per-backend state
- * like archive/session metadata).
- */
-export function MergedAppStateQuery<T>({
-  query,
-  deps = [],
-  children,
-}: MergedAppStateQueryProps<T>) {
-  const resourceMap = useAtomValue(backendResourcesAtom);
-  const backends = Object.values(resourceMap).filter((r) => r.appDb != null);
+/** @deprecated Use MergedQuery instead */
+export const MergedEphemeralStateQuery = MergedQuery;
 
-  if (backends.length === 0) {
-    return <>{children({ data: null, isLoading: true })}</>;
-  }
-
-  return (
-    <AppStateQueryAccumulator<T>
-      backends={backends}
-      index={0}
-      accumulated={[]}
-      anyLoading={false}
-      query={query}
-      deps={deps}>
-      {children}
-    </AppStateQueryAccumulator>
-  );
-}
-
-interface AppStateQueryAccumulatorProps<T> {
-  backends: BackendResources[];
-  index: number;
-  accumulated: WithBackendUrl<T>[];
-  anyLoading: boolean;
-  query: (db: AppStateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null;
-  deps: unknown[];
-  children: (result: { data: WithBackendUrl<T>[] | null; isLoading: boolean }) => React.ReactNode;
-}
-
-function AppStateQueryAccumulator<T>({
-  backends,
-  index,
-  accumulated,
-  anyLoading,
-  query,
-  deps,
-  children,
-}: AppStateQueryAccumulatorProps<T>) {
-  const backend = backends[index];
-  const db = backend.appDb!;
-
-  const result = useLiveQuery((q) => query(db, q), [db, ...deps]);
-  const rawData = (result.data as T[] | null) ?? [];
-  const tagged = rawData.map((item) => ({ ...item, backendUrl: backend.url }));
-  const merged = [...accumulated, ...tagged];
-  const loading = anyLoading || backend.loading || result.isLoading;
-
-  if (index + 1 < backends.length) {
-    return (
-      <AppStateQueryAccumulator<T>
-        backends={backends}
-        index={index + 1}
-        accumulated={merged}
-        anyLoading={loading}
-        query={query}
-        deps={deps}>
-        {children}
-      </AppStateQueryAccumulator>
-    );
-  }
-
-  return <>{children({ data: merged.length > 0 ? merged : null, isLoading: loading })}</>;
-}
-
-// --- Ephemeral state query merging ---
-
-interface MergedEphemeralStateQueryProps<T> {
-  query: (
-    db: EphemeralStateDB,
-    q: InitialQueryBuilder
-  ) => QueryBuilder<any> | undefined | null;
-  deps?: unknown[];
-  children: (result: { data: WithBackendUrl<T>[] | null; isLoading: boolean }) => React.ReactNode;
-}
-
-/**
- * Same as MergedStateQuery but for EphemeralStateDB (live-only session status,
- * in-progress messages, worktree status).
- */
-export function MergedEphemeralStateQuery<T>({
-  query,
-  deps = [],
-  children,
-}: MergedEphemeralStateQueryProps<T>) {
-  const resourceMap = useAtomValue(backendResourcesAtom);
-  const backends = Object.values(resourceMap).filter((r) => r.ephemeralDb != null);
-
-  if (backends.length === 0) {
-    return <>{children({ data: null, isLoading: true })}</>;
-  }
-
-  return (
-    <EphemeralStateQueryAccumulator<T>
-      backends={backends}
-      index={0}
-      accumulated={[]}
-      anyLoading={false}
-      query={query}
-      deps={deps}>
-      {children}
-    </EphemeralStateQueryAccumulator>
-  );
-}
-
-interface EphemeralStateQueryAccumulatorProps<T> {
-  backends: BackendResources[];
-  index: number;
-  accumulated: WithBackendUrl<T>[];
-  anyLoading: boolean;
-  query: (
-    db: EphemeralStateDB,
-    q: InitialQueryBuilder
-  ) => QueryBuilder<any> | undefined | null;
-  deps: unknown[];
-  children: (result: { data: WithBackendUrl<T>[] | null; isLoading: boolean }) => React.ReactNode;
-}
-
-function EphemeralStateQueryAccumulator<T>({
-  backends,
-  index,
-  accumulated,
-  anyLoading,
-  query,
-  deps,
-  children,
-}: EphemeralStateQueryAccumulatorProps<T>) {
-  const backend = backends[index];
-  const db = backend.ephemeralDb!;
-
-  const result = useLiveQuery((q) => query(db, q), [db, ...deps]);
-  const rawData = (result.data as T[] | null) ?? [];
-  const tagged = rawData.map((item) => ({ ...item, backendUrl: backend.url }));
-  const merged = [...accumulated, ...tagged];
-  const loading = anyLoading || backend.loading || result.isLoading;
-
-  if (index + 1 < backends.length) {
-    return (
-      <EphemeralStateQueryAccumulator<T>
-        backends={backends}
-        index={index + 1}
-        accumulated={merged}
-        anyLoading={loading}
-        query={query}
-        deps={deps}>
-        {children}
-      </EphemeralStateQueryAccumulator>
-    );
-  }
-
-  return <>{children({ data: merged.length > 0 ? merged : null, isLoading: loading })}</>;
-}
+/** @deprecated Use MergedQuery instead */
+export const MergedAppStateQuery = MergedQuery;
 
 // --- Single-backend query hook ---
 
 /**
- * Runs a StateDB live query against a single specific backend.
+ * Runs a live query against a single specific backend's unified DB.
  * Use this when you know which backend owns the data (e.g., session-scoped queries).
  */
-export function useBackendStateQuery<T>(
+export function useBackendQuery<T>(
   backendUrl: BackendUrl,
-  query: (db: StateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null,
+  query: (db: UnifiedDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null,
   deps: unknown[] = []
 ): { data: T[] | null; isLoading: boolean } {
   const resourceMap = useAtomValue(backendResourcesAtom);
@@ -301,42 +147,11 @@ export function useBackendStateQuery<T>(
   return { data: result.data as T[] | null, isLoading: loading || result.isLoading };
 }
 
-/**
- * Runs an EphemeralStateDB live query against a single specific backend.
- * Use this when you know which backend owns the data (e.g., session-scoped queries).
- */
-export function useBackendEphemeralStateQuery<T>(
-  backendUrl: BackendUrl,
-  query: (
-    db: EphemeralStateDB,
-    q: InitialQueryBuilder
-  ) => QueryBuilder<any> | undefined | null,
-  deps: unknown[] = []
-): { data: T[] | null; isLoading: boolean } {
-  const resourceMap = useAtomValue(backendResourcesAtom);
-  const resources = resourceMap[backendUrl];
-  const db = resources?.ephemeralDb ?? null;
-  const loading = resources?.loading ?? true;
+/** @deprecated Use useBackendQuery instead */
+export const useBackendStateQuery = useBackendQuery;
 
-  const result = useLiveQuery((q) => db && query(db, q), [db, ...deps]);
-  if (!db) return { data: null, isLoading: true };
-  return { data: result.data as T[] | null, isLoading: loading || result.isLoading };
-}
+/** @deprecated Use useBackendQuery instead */
+export const useBackendEphemeralStateQuery = useBackendQuery;
 
-/**
- * Runs an AppStateDB live query against a single specific backend.
- */
-export function useBackendAppStateQuery<T>(
-  backendUrl: BackendUrl,
-  query: (db: AppStateDB, q: InitialQueryBuilder) => QueryBuilder<any> | undefined | null,
-  deps: unknown[] = []
-): { data: T[] | null; isLoading: boolean } {
-  const resourceMap = useAtomValue(backendResourcesAtom);
-  const resources = resourceMap[backendUrl];
-  const db = resources?.appDb ?? null;
-  const loading = resources?.loading ?? true;
-
-  const result = useLiveQuery((q) => db && query(db, q), [db, ...deps]);
-  if (!db) return { data: null, isLoading: true };
-  return { data: result.data as T[] | null, isLoading: loading || result.isLoading };
-}
+/** @deprecated Use useBackendQuery instead */
+export const useBackendAppStateQuery = useBackendQuery;

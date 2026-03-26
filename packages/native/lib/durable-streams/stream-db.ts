@@ -5,6 +5,7 @@
  * that are fed from a DurableStream connection and kept in sync via an
  * EventDispatcher that routes stream events to the correct collection.
  */
+// [FLOCKCODE] Renamed import to allow createCollectionFn callback override
 import { createCollection as defaultCreateCollection, createOptimisticAction } from "@tanstack/db"
 import { DurableStream as DurableStreamClass } from "@durable-streams/client"
 import { isChangeEvent, isControlEvent } from "./types"
@@ -116,6 +117,9 @@ export type ActionMap<TActions extends Record<string, ActionDefinition<any>>> =
     [K in keyof TActions]: ReturnType<typeof createOptimisticAction<any>>
   }
 
+// [FLOCKCODE] StreamCollectionConfig and CreateCollectionFn — added to support
+// pluggable collection creation (e.g. wrapping with persistedCollectionOptions).
+
 /**
  * The collection config that createStreamDB builds for each collection before
  * passing it to createCollection (or the user-supplied createCollectionFn).
@@ -163,6 +167,7 @@ export interface CreateStreamDBOptions<
   state: TDef
   /** Optional factory function to create actions with db and stream context */
   actions?: ActionFactory<TDef, TActions>
+  // [FLOCKCODE] createCollectionFn — added to support pluggable collection creation
   /**
    * Optional callback to customize how collections are created.
    *
@@ -788,6 +793,7 @@ export function createStreamDB<
 ): TActions extends Record<string, never>
   ? StreamDB<TDef>
   : StreamDBWithActions<TDef, TActions> {
+  // [FLOCKCODE] Destructure createCollectionFn (added option)
   const { streamOptions, state, actions: actionsFactory, createCollectionFn } = options
 
   // Create a stream handle (lightweight, doesn't connect until stream() is called)
@@ -800,6 +806,8 @@ export function createStreamDB<
   const collectionInstances: Record<string, Collection<object, string>> = {}
 
   for (const [name, definition] of Object.entries(state)) {
+    // [FLOCKCODE] Extract config into StreamCollectionConfig so createCollectionFn
+    // can wrap it (e.g. with persistedCollectionOptions) before creating the collection
     const config: StreamCollectionConfig = {
       id: `stream-db:${name}`,
       schema: definition.schema as StandardSchemaV1<object>,
@@ -814,6 +822,7 @@ export function createStreamDB<
       gcTime: 0,
     }
 
+    // [FLOCKCODE] Use createCollectionFn if provided, else default createCollection
     const collection = createCollectionFn
       ? createCollectionFn(name, config)
       : defaultCreateCollection(config)
@@ -915,4 +924,282 @@ export function createStreamDB<
   }
 
   return db as any
+}
+
+// ============================================================================
+// [FLOCKCODE] Multi-stream DB — create one DB, attach multiple streams
+// ============================================================================
+
+/**
+ * Captured sync callbacks for a single collection. These are the functions
+ * that TanStack DB passes into the `sync.sync()` callback. We capture them
+ * so that multiple EventDispatchers (one per stream) can drive the same
+ * collection.
+ */
+interface CapturedSyncCallbacks {
+  begin: () => void
+  write: (message: { value: any; type: 'insert' | 'update' | 'delete' }) => void
+  commit: () => void
+  markReady: () => void
+  truncate: () => void
+}
+
+/**
+ * A sync config that captures the TanStack DB sync callbacks and exposes
+ * them for external use. This allows multiple EventDispatchers to drive
+ * writes into the same collection.
+ */
+function createCapturingSyncConfig(): {
+  syncConfig: SyncConfig<any, string>
+  getCallbacks: () => CapturedSyncCallbacks | null
+} {
+  let captured: CapturedSyncCallbacks | null = null
+
+  const syncConfig: SyncConfig<any, string> = {
+    sync: ({ begin, write, commit, markReady, truncate }: {
+      begin: () => void
+      write: (message: { value: any; type: 'insert' | 'update' | 'delete' }) => void
+      commit: () => void
+      markReady: () => void
+      truncate: () => void
+    }) => {
+      captured = { begin, write, commit, markReady, truncate }
+      return () => {
+        captured = null
+      }
+    },
+  }
+
+  return { syncConfig, getCallbacks: () => captured }
+}
+
+/**
+ * A handle returned by appendStreamToDb for managing one stream's lifecycle.
+ */
+export interface StreamHandle {
+  /** The underlying DurableStream instance */
+  stream: DurableStream
+  /** Connect and sync until up-to-date */
+  preload: () => Promise<void>
+  /** Close this stream connection */
+  close: () => void
+  /** Wait for a specific txid from this stream */
+  awaitTxId: (txid: string, timeout?: number) => Promise<void>
+}
+
+/**
+ * A multi-stream DB that holds collections and allows attaching streams.
+ */
+export interface MultiStreamDB<TDef extends StreamStateDefinition> {
+  /** All collections in this DB */
+  collections: CollectionMap<TDef>
+  /** Close all attached streams */
+  close: () => void
+}
+
+/**
+ * Options for creating a multi-stream DB (no streams attached yet).
+ */
+export interface CreateDbWithNoStreamsOptions<
+  TDef extends StreamStateDefinition = StreamStateDefinition,
+> {
+  /** The combined state definition for all collections */
+  state: TDef
+  /** Optional callback to customize collection creation (e.g. persistence) */
+  createCollectionFn?: CreateCollectionFn
+}
+
+/**
+ * Internal state stored per collection to support multi-stream routing.
+ */
+interface CollectionEntry {
+  definition: CollectionDefinition
+  collection: Collection<object, string>
+  getCallbacks: () => CapturedSyncCallbacks | null
+}
+
+/**
+ * Create a DB with collections but no stream connections.
+ *
+ * Collections are created immediately and their sync callbacks are captured.
+ * Use `appendStreamToDb()` to attach one or more streams that will feed
+ * events into the collections.
+ *
+ * @example
+ * ```ts
+ * const db = createDbWithNoStreams({ state: allCollectionsDef });
+ * const stateStream = appendStreamToDb(db, {
+ *   streamOptions: { url: `${base}/${instanceId}` },
+ *   collectionNames: ['projects', 'sessions', 'messages'],
+ * });
+ * const ephemeralStream = appendStreamToDb(db, {
+ *   streamOptions: { url: `${base}/${instanceId}/ephemeral` },
+ *   collectionNames: ['sessionStatuses', 'messages', 'changes', ...],
+ * });
+ * await Promise.all([stateStream.preload(), ephemeralStream.preload()]);
+ * ```
+ */
+export function createDbWithNoStreams<
+  TDef extends StreamStateDefinition,
+>(
+  options: CreateDbWithNoStreamsOptions<TDef>
+): MultiStreamDB<TDef> & { _entries: Map<string, CollectionEntry> } {
+  const { state, createCollectionFn } = options
+
+  const collectionInstances: Record<string, Collection<object, string>> = {}
+  const entries = new Map<string, CollectionEntry>()
+  const streamHandles: StreamHandle[] = []
+
+  for (const [name, definition] of Object.entries(state)) {
+    const { syncConfig, getCallbacks } = createCapturingSyncConfig()
+
+    const config: StreamCollectionConfig = {
+      id: `stream-db:${name}`,
+      schema: definition.schema as StandardSchemaV1<object>,
+      getKey: (item: any) => String(item[definition.primaryKey]),
+      sync: syncConfig,
+      startSync: true,
+      gcTime: 0,
+    }
+
+    const collection = createCollectionFn
+      ? createCollectionFn(name, config)
+      : defaultCreateCollection(config)
+
+    collectionInstances[name] = collection
+    entries.set(name, { definition, collection, getCallbacks })
+  }
+
+  return {
+    collections: collectionInstances as unknown as CollectionMap<TDef>,
+    close: () => {
+      for (const handle of streamHandles) {
+        handle.close()
+      }
+    },
+    // Exposed for appendStreamToDb — not part of the public interface
+    _entries: entries,
+  }
+}
+
+/**
+ * Options for attaching a stream to an existing multi-stream DB.
+ */
+export interface AppendStreamOptions {
+  /** Options for creating the DurableStream connection */
+  streamOptions: DurableStreamOptions
+  /**
+   * Which collections this stream feeds events into.
+   * These must be keys from the state definition passed to createDbWithNoStreams.
+   */
+  collectionNames: string[]
+}
+
+/**
+ * Attach a DurableStream to an existing multi-stream DB.
+ *
+ * Creates a new stream connection and EventDispatcher that routes events
+ * to the specified subset of collections. Multiple streams can feed into
+ * the same collection (e.g. `messages` from both state and ephemeral streams).
+ *
+ * Returns a StreamHandle for managing this stream's lifecycle independently.
+ */
+export function appendStreamToDb<TDef extends StreamStateDefinition>(
+  db: MultiStreamDB<TDef> & { _entries: Map<string, CollectionEntry> },
+  options: AppendStreamOptions
+): StreamHandle {
+  const { streamOptions, collectionNames } = options
+
+  // Create a stream handle (lightweight, doesn't connect until stream() is called)
+  const stream = new DurableStreamClass(streamOptions)
+
+  // Create a dedicated EventDispatcher for this stream
+  const dispatcher = new EventDispatcher()
+
+  // Register handlers for each collection this stream feeds
+  for (const name of collectionNames) {
+    const entry = db._entries.get(name)
+    if (!entry) {
+      throw new Error(
+        `[appendStreamToDb] Collection "${name}" not found in DB. ` +
+        `Available: ${Array.from(db._entries.keys()).join(', ')}`
+      )
+    }
+
+    const callbacks = entry.getCallbacks()
+    if (!callbacks) {
+      throw new Error(
+        `[appendStreamToDb] Collection "${name}" sync callbacks not yet available. ` +
+        `Ensure collection sync has started (startSync: true).`
+      )
+    }
+
+    // Register this collection's sync callbacks with the dispatcher
+    dispatcher.registerHandler(entry.definition.type, {
+      begin: callbacks.begin,
+      write: (value, type) => {
+        callbacks.write({ value, type })
+      },
+      commit: callbacks.commit,
+      markReady: callbacks.markReady,
+      truncate: callbacks.truncate,
+      primaryKey: entry.definition.primaryKey,
+    })
+  }
+
+  // Stream consumer state (lazy initialization)
+  let streamResponse: StreamResponse<StateEvent> | null = null
+  const abortController = new AbortController()
+  let consumerStarted = false
+
+  const startConsumer = async (): Promise<void> => {
+    if (consumerStarted) return
+    consumerStarted = true
+
+    streamResponse = await stream.stream<StateEvent>({
+      live: true,
+      signal: abortController.signal,
+    })
+
+    let batchCount = 0
+
+    streamResponse.subscribeJson((batch) => {
+      try {
+        batchCount++
+
+        for (const event of batch.items) {
+          if (isChangeEvent(event)) {
+            dispatcher.dispatchChange(event)
+          } else if (isControlEvent(event)) {
+            dispatcher.dispatchControl(event)
+          }
+        }
+
+        if (batch.upToDate) {
+          dispatcher.markUpToDate()
+        }
+      } catch (error) {
+        console.error(`[StreamDB] Error processing batch:`, error)
+        dispatcher.rejectAll(error as Error)
+        abortController.abort()
+      }
+      return Promise.resolve()
+    })
+  }
+
+  const handle: StreamHandle = {
+    stream,
+    preload: async () => {
+      await startConsumer()
+      await dispatcher.waitForUpToDate()
+    },
+    close: () => {
+      dispatcher.rejectAll(new Error(`Stream closed`))
+      abortController.abort()
+    },
+    awaitTxId: (txid: string, timeout?: number) =>
+      dispatcher.awaitTxId(txid, timeout),
+  }
+
+  return handle
 }

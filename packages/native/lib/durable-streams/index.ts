@@ -18,7 +18,7 @@ export type {
 
 export { isChangeEvent, isControlEvent } from './types';
 
-// Stream DB
+// Stream DB (original single-stream API)
 export { createStreamDB, createStateSchema } from './stream-db';
 export type {
   CollectionDefinition,
@@ -36,6 +36,15 @@ export type {
   ActionFactory,
   ActionMap,
   ActionDefinition,
+} from './stream-db';
+
+// Multi-stream DB (create once, attach multiple streams)
+export { createDbWithNoStreams, appendStreamToDb } from './stream-db';
+export type {
+  MultiStreamDB,
+  CreateDbWithNoStreamsOptions,
+  AppendStreamOptions,
+  StreamHandle,
 } from './stream-db';
 
 // Re-export key types from @tanstack/db for convenience

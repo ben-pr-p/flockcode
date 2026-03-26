@@ -3,6 +3,11 @@ export {
   stateSchema,
   ephemeralStateSchema,
   appStateSchema,
+  unifiedStateDef,
+  PERSISTED_COLLECTION_NAMES,
+  STATE_STREAM_COLLECTIONS,
+  EPHEMERAL_STREAM_COLLECTIONS,
+  APP_STREAM_COLLECTIONS,
 };
 export type {
   ProjectValue,
@@ -15,13 +20,15 @@ export type {
   StateDB,
   EphemeralStateDB,
   AppStateDB,
+  UnifiedStateDef,
+  UnifiedDB,
   UIMessage,
   ToolMeta,
 };
 export type { ChangedFile, ToolCallStatus } from '../../server/src/types';
 
 import { createStateSchema } from './durable-streams';
-import type { StreamDB } from './durable-streams';
+import type { StreamDB, MultiStreamDB } from './durable-streams';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Message, ChangedFile } from '../../server/src/types';
 
@@ -114,7 +121,11 @@ const ephemeralStateDef = {
     type: 'sessionStatus' as const,
     primaryKey: 'sessionId' as const,
   },
-  messages: {
+  // Renamed from "messages" to "pendingMessages" to avoid collision with the
+  // persisted messages collection. The server still sends type: 'message' on
+  // the ephemeral stream — the EventDispatcher for the ephemeral stream maps
+  // that type to this collection via appendStreamToDb's collectionNames mapping.
+  pendingMessages: {
     schema: passthrough<Message>(),
     type: 'message' as const,
     primaryKey: 'id' as const,
@@ -160,6 +171,66 @@ type AppStateDef = typeof appStateDef;
 type AppStateDB = StreamDB<AppStateDef>;
 
 const appStateSchema = createStateSchema(appStateDef);
+
+// --- Unified state definition (all collections in one DB, fed by multiple streams) ---
+
+/**
+ * All collections merged into a single definition. Used with createDbWithNoStreams()
+ * to create one DB per backend, then appendStreamToDb() attaches individual streams.
+ *
+ * Note: `messages` (persisted, from state stream) and `pendingMessages` (ephemeral,
+ * from ephemeral stream) are separate collections even though the server sends both
+ * as event type 'message'. The per-stream EventDispatcher routes them correctly.
+ */
+const unifiedStateDef = {
+  // From stateDef (state stream — persisted)
+  projects: stateDef.projects,
+  sessions: stateDef.sessions,
+  messages: stateDef.messages,
+  // From ephemeralStateDef (ephemeral stream — not persisted)
+  sessionStatuses: ephemeralStateDef.sessionStatuses,
+  pendingMessages: ephemeralStateDef.pendingMessages,
+  changes: ephemeralStateDef.changes,
+  worktreeStatuses: ephemeralStateDef.worktreeStatuses,
+  permissionRequests: ephemeralStateDef.permissionRequests,
+  // From appStateDef (app stream — persisted)
+  sessionMeta: appStateDef.sessionMeta,
+};
+
+type UnifiedStateDef = typeof unifiedStateDef;
+
+/**
+ * A unified DB with all collections from all three streams.
+ * This is not a StreamDB (no single stream) — it's a MultiStreamDB.
+ */
+type UnifiedDB = MultiStreamDB<UnifiedStateDef>;
+
+/**
+ * Collection names that should be persisted to SQLite.
+ * Ephemeral collections (sessionStatuses, pendingMessages, changes,
+ * worktreeStatuses, permissionRequests) are intentionally excluded.
+ */
+const PERSISTED_COLLECTION_NAMES = new Set([
+  'projects',
+  'sessions',
+  'messages',
+  'sessionMeta',
+]);
+
+/**
+ * Which collections each stream feeds. Used by appendStreamToDb().
+ * The key is a label, the value is the list of collection names from
+ * unifiedStateDef that this stream's events should route to.
+ */
+const STATE_STREAM_COLLECTIONS = ['projects', 'sessions', 'messages'] as const;
+const EPHEMERAL_STREAM_COLLECTIONS = [
+  'sessionStatuses',
+  'pendingMessages',
+  'changes',
+  'worktreeStatuses',
+  'permissionRequests',
+] as const;
+const APP_STREAM_COLLECTIONS = ['sessionMeta'] as const;
 
 // UI types derived from stream state
 

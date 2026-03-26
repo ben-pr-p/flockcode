@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { loadable } from 'jotai/utils';
-import { createStreamDB } from '../lib/durable-streams';
+import {
+  createDbWithNoStreams,
+  appendStreamToDb,
+  type StreamHandle,
+  type MultiStreamDB,
+} from '../lib/durable-streams';
 import {
   backendsAtom,
   backendConnectionsAtom,
@@ -11,85 +16,32 @@ import {
 } from '../state/backends';
 import { backendResourcesAtom, type BackendResources } from '../lib/backend-streams';
 import {
-  stateSchema,
-  ephemeralStateSchema,
-  appStateSchema,
-  type StateDB,
-  type EphemeralStateDB,
-  type AppStateDB,
+  unifiedStateDef,
+  PERSISTED_COLLECTION_NAMES,
+  STATE_STREAM_COLLECTIONS,
+  EPHEMERAL_STREAM_COLLECTIONS,
+  APP_STREAM_COLLECTIONS,
+  type UnifiedDB,
 } from '../lib/stream-db';
 import { createApiClient, type ApiClient } from '../lib/api';
 import { createPersistedCollectionFn } from '../lib/persistence';
 
 const POLL_INTERVAL = 10_000;
 
-/** Collections in stateSchema that should be persisted to SQLite. */
-const PERSISTED_STATE_COLLECTIONS = new Set(['projects', 'sessions', 'messages']);
-
-/** Collections in appStateSchema that should be persisted to SQLite. */
-const PERSISTED_APP_STATE_COLLECTIONS = new Set(['sessionMeta']);
-
 interface PerBackendState {
   instanceId: string | null;
-  db: StateDB | null;
-  ephemeralDb: EphemeralStateDB | null;
-  appDb: AppStateDB | null;
+  /** Single DB with all collections for this backend */
+  db: UnifiedDB | null;
+  /** Internal ref for the _entries map needed by appendStreamToDb */
+  dbInternal: (UnifiedDB & { _entries: Map<string, any> }) | null;
+  /** Stream handles for lifecycle management */
+  stateStream: StreamHandle | null;
+  ephemeralStream: StreamHandle | null;
+  appStream: StreamHandle | null;
   api: ApiClient | null;
   intervalId: ReturnType<typeof setInterval> | null;
   abortController: AbortController | null;
   cancelled: boolean;
-}
-
-// createApiClient is now imported from '../lib/api'
-
-/**
- * Creates a StateDB connected to a backend's state stream.
- * Projects, sessions, and messages are persisted to SQLite.
- */
-function createStateDB(url: string, instanceId: string, authToken?: string): StateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/${instanceId}`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: stateSchema,
-    createCollectionFn: createPersistedCollectionFn(PERSISTED_STATE_COLLECTIONS),
-  }) as StateDB;
-}
-
-/**
- * Creates an EphemeralStateDB connected to a backend's ephemeral stream.
- */
-function createEphemeralStateDB(
-  url: string,
-  instanceId: string,
-  authToken?: string
-): EphemeralStateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/${instanceId}/ephemeral`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: ephemeralStateSchema,
-  }) as EphemeralStateDB;
-}
-
-/**
- * Creates an AppStateDB connected to a backend's persistent app stream.
- * Session metadata is persisted to SQLite.
- */
-function createAppStateDB(url: string, authToken?: string): AppStateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/app`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: appStateSchema,
-    createCollectionFn: createPersistedCollectionFn(PERSISTED_APP_STATE_COLLECTIONS),
-  }) as AppStateDB;
 }
 
 // Loadable wrapper so we can distinguish "not yet loaded" from "loaded []"
@@ -98,16 +50,20 @@ const backendsLoadableAtom = loadable(backendsAtom);
 /**
  * Core orchestration hook that manages connections to all enabled backends.
  *
- * Replaces useServerHealth, the debounce logic in useSettings, and the
- * implicit stream setup in stream-db.ts atoms.
+ * Creates a single unified DB per backend with all collections, then attaches
+ * three streams (state, ephemeral, app) that feed events into their respective
+ * subsets of collections.
  *
  * Responsibilities per enabled backend:
  * 1. Poll GET /health every 10s — returns instanceId + health status
- * 2. Detect instanceId changes (server restart) -> tear down and recreate StreamDBs
+ * 2. Detect instanceId changes (server restart) -> close instance-scoped
+ *    streams, create new ones against the new instanceId
  * 3. Create oRPC API client (with auth header if authToken is set)
- * 4. Create ephemeral StreamDB at ${url}/${instanceId}
- * 5. Create persistent StreamDB at ${url}/app
- * 6. Write results to backendConnectionsAtom and backendResourcesAtom
+ * 4. Create unified DB (once per backend) with all collections
+ * 5. Attach state stream at ${url}/${instanceId}
+ * 6. Attach ephemeral stream at ${url}/${instanceId}/ephemeral
+ * 7. Attach app stream at ${url}/app (survives instanceId changes)
+ * 8. Write results to backendConnectionsAtom and backendResourcesAtom
  *
  * Mount once at the app root.
  */
@@ -155,8 +111,10 @@ export function useBackendManager() {
       const perBackend: PerBackendState = {
         instanceId: null,
         db: null,
-        ephemeralDb: null,
-        appDb: null,
+        dbInternal: null,
+        stateStream: null,
+        ephemeralStream: null,
+        appStream: null,
         api: null,
         intervalId: null,
         abortController: null,
@@ -184,8 +142,6 @@ export function useBackendManager() {
         [backend.url]: {
           url: backend.url,
           db: null,
-          ephemeralDb: null,
-          appDb: null,
           api: perBackend.api,
           loading: true,
         } satisfies BackendResources,
@@ -207,6 +163,13 @@ export function useBackendManager() {
       stateRef.current.clear();
     };
   }, []);
+}
+
+/**
+ * Build auth headers object if an auth token is present.
+ */
+function authHeaders(authToken?: string): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
 }
 
 function startPolling(
@@ -266,66 +229,94 @@ function startPolling(
 
       // Detect instanceId change (server restart)
       if (newInstanceId && newInstanceId !== state.instanceId) {
-        // Tear down old instance-scoped StreamDBs
-        if (state.db) {
-          try {
-            state.db.close();
-          } catch {
-            /* ignore */
-          }
-        }
-        if (state.ephemeralDb) {
-          try {
-            state.ephemeralDb.close();
-          } catch {
-            /* ignore */
-          }
-        }
+        const cleanUrl = backend.url.replace(/\/$/, '');
+
+        // Close old instance-scoped streams (state + ephemeral)
+        // The app stream survives instanceId changes.
+        closeStreamSafe(state.stateStream);
+        closeStreamSafe(state.ephemeralStream);
+        state.stateStream = null;
+        state.ephemeralStream = null;
 
         state.instanceId = newInstanceId;
 
-        // Create new instance StreamDB (finalized, replayable state)
-        try {
-          const db = createStateDB(backend.url, newInstanceId, backend.authToken);
-          await db.preload();
-          state.db = db;
-          console.log('[poll] StateDB created', backend.url);
-        } catch (err) {
-          console.error(`[useBackendManager] Failed to create StateDB for ${backend.url}:`, err);
-          state.db = null;
-        }
-
-        // Create new ephemeral StreamDB (live-only UI state)
-        try {
-          const ephemeralDb = createEphemeralStateDB(
-            backend.url,
-            newInstanceId,
-            backend.authToken
-          );
-          await ephemeralDb.preload();
-          state.ephemeralDb = ephemeralDb;
-          console.log('[poll] EphemeralStateDB created', backend.url);
-        } catch (err) {
-          console.error(
-            `[useBackendManager] Failed to create EphemeralStateDB for ${backend.url}:`,
-            err
-          );
-          state.ephemeralDb = null;
-        }
-
-        // Create persistent app StreamDB (only once — /app stream survives restarts)
-        if (!state.appDb) {
+        // Create the unified DB once (on first instanceId) — collections persist
+        // across instanceId changes. Only the streams are torn down and recreated.
+        if (!state.dbInternal) {
           try {
-            const appDb = createAppStateDB(backend.url, backend.authToken);
-            await appDb.preload();
-            state.appDb = appDb;
-            console.log('[poll] AppStateDB created', backend.url);
+            const db = createDbWithNoStreams({
+              state: unifiedStateDef,
+              createCollectionFn: createPersistedCollectionFn(PERSISTED_COLLECTION_NAMES),
+            });
+            state.dbInternal = db;
+            state.db = db;
+            console.log('[poll] Unified DB created', backend.url);
           } catch (err) {
             console.error(
-              `[useBackendManager] Failed to create AppStateDB for ${backend.url}:`,
+              `[useBackendManager] Failed to create unified DB for ${backend.url}:`,
               err
             );
-            state.appDb = null;
+          }
+        }
+
+        if (state.dbInternal) {
+          // Attach state stream (instance-scoped)
+          try {
+            const stateStream = appendStreamToDb(state.dbInternal, {
+              streamOptions: {
+                url: `${cleanUrl}/${newInstanceId}`,
+                ...{ headers: authHeaders(backend.authToken) },
+              },
+              collectionNames: [...STATE_STREAM_COLLECTIONS],
+            });
+            await stateStream.preload();
+            state.stateStream = stateStream;
+            console.log('[poll] State stream attached', backend.url);
+          } catch (err) {
+            console.error(
+              `[useBackendManager] Failed to attach state stream for ${backend.url}:`,
+              err
+            );
+          }
+
+          // Attach ephemeral stream (instance-scoped)
+          try {
+            const ephemeralStream = appendStreamToDb(state.dbInternal, {
+              streamOptions: {
+                url: `${cleanUrl}/${newInstanceId}/ephemeral`,
+                ...{ headers: authHeaders(backend.authToken) },
+              },
+              collectionNames: [...EPHEMERAL_STREAM_COLLECTIONS],
+            });
+            await ephemeralStream.preload();
+            state.ephemeralStream = ephemeralStream;
+            console.log('[poll] Ephemeral stream attached', backend.url);
+          } catch (err) {
+            console.error(
+              `[useBackendManager] Failed to attach ephemeral stream for ${backend.url}:`,
+              err
+            );
+          }
+
+          // Attach app stream (only once — survives instanceId changes)
+          if (!state.appStream) {
+            try {
+              const appStream = appendStreamToDb(state.dbInternal, {
+                streamOptions: {
+                  url: `${cleanUrl}/app`,
+                  ...{ headers: authHeaders(backend.authToken) },
+                },
+                collectionNames: [...APP_STREAM_COLLECTIONS],
+              });
+              await appStream.preload();
+              state.appStream = appStream;
+              console.log('[poll] App stream attached', backend.url);
+            } catch (err) {
+              console.error(
+                `[useBackendManager] Failed to attach app stream for ${backend.url}:`,
+                err
+              );
+            }
           }
         }
 
@@ -335,8 +326,6 @@ function startPolling(
           [backend.url]: {
             url: backend.url,
             db: state.db,
-            ephemeralDb: state.ephemeralDb,
-            appDb: state.appDb,
             api: state.api,
             loading: false,
           } satisfies BackendResources,
@@ -375,27 +364,29 @@ function startPolling(
   state.intervalId = setInterval(poll, POLL_INTERVAL);
 }
 
+function closeStreamSafe(handle: StreamHandle | null) {
+  if (!handle) return;
+  try {
+    handle.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 function tearDown(state: PerBackendState) {
   state.cancelled = true;
   if (state.intervalId) clearInterval(state.intervalId);
   state.abortController?.abort();
+
+  // Close all stream handles
+  closeStreamSafe(state.stateStream);
+  closeStreamSafe(state.ephemeralStream);
+  closeStreamSafe(state.appStream);
+
+  // Close the unified DB (which also closes any remaining streams)
   if (state.db) {
     try {
       state.db.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  if (state.ephemeralDb) {
-    try {
-      state.ephemeralDb.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  if (state.appDb) {
-    try {
-      state.appDb.close();
     } catch {
       /* ignore */
     }
