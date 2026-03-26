@@ -20,8 +20,8 @@ export type {
 };
 export type { ChangedFile, ToolCallStatus } from '../../server/src/types';
 
-import { createStateSchema } from '@durable-streams/state';
-import type { StreamDB } from '@durable-streams/state';
+import { createStateSchema } from './durable-streams';
+import type { StreamDB } from './durable-streams';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { Message, ChangedFile } from '../../server/src/types';
 

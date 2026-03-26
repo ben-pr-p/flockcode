@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { loadable } from 'jotai/utils';
-import { createStreamDB } from '@durable-streams/state';
+import { createStreamDB } from '../lib/durable-streams';
 import {
   backendsAtom,
   backendConnectionsAtom,
@@ -19,8 +19,15 @@ import {
   type AppStateDB,
 } from '../lib/stream-db';
 import { createApiClient, type ApiClient } from '../lib/api';
+import { createPersistedCollectionFn } from '../lib/persistence';
 
 const POLL_INTERVAL = 10_000;
+
+/** Collections in stateSchema that should be persisted to SQLite. */
+const PERSISTED_STATE_COLLECTIONS = new Set(['projects', 'sessions', 'messages']);
+
+/** Collections in appStateSchema that should be persisted to SQLite. */
+const PERSISTED_APP_STATE_COLLECTIONS = new Set(['sessionMeta']);
 
 interface PerBackendState {
   instanceId: string | null;
@@ -36,7 +43,8 @@ interface PerBackendState {
 // createApiClient is now imported from '../lib/api'
 
 /**
- * Creates a StateDB connected to a backend's ephemeral stream.
+ * Creates a StateDB connected to a backend's state stream.
+ * Projects, sessions, and messages are persisted to SQLite.
  */
 function createStateDB(url: string, instanceId: string, authToken?: string): StateDB {
   const cleanUrl = url.replace(/\/$/, '');
@@ -46,6 +54,7 @@ function createStateDB(url: string, instanceId: string, authToken?: string): Sta
       ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
     },
     state: stateSchema,
+    createCollectionFn: createPersistedCollectionFn(PERSISTED_STATE_COLLECTIONS),
   }) as StateDB;
 }
 
@@ -69,6 +78,7 @@ function createEphemeralStateDB(
 
 /**
  * Creates an AppStateDB connected to a backend's persistent app stream.
+ * Session metadata is persisted to SQLite.
  */
 function createAppStateDB(url: string, authToken?: string): AppStateDB {
   const cleanUrl = url.replace(/\/$/, '');
@@ -78,6 +88,7 @@ function createAppStateDB(url: string, authToken?: string): AppStateDB {
       ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
     },
     state: appStateSchema,
+    createCollectionFn: createPersistedCollectionFn(PERSISTED_APP_STATE_COLLECTIONS),
   }) as AppStateDB;
 }
 
