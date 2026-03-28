@@ -1,3 +1,6 @@
+// Polyfill must run before any TanStack DB code — idempotent, safe to import multiple times
+import './polyfills';
+
 /**
  * All TanStack DB collections for the app.
  *
@@ -6,7 +9,7 @@
  * can attach streams to them later. Local-only collections have a no-op sync.
  *
  * Import individual collections directly in components:
- *   import { sessionsCollection } from '../lib/collections'
+ *   import { collections } from '../lib/collections'
  */
 import { open } from '@op-engineering/op-sqlite';
 import { createCollection } from '@tanstack/db';
