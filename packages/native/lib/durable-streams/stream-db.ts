@@ -1049,14 +1049,6 @@ export function appendStreamToDb(
     dispatcher.registerHandler(entry.definition.type, {
       begin: callbacks.begin,
       write: (value, type) => {
-        if (value == null || type == null) {
-          console.error(`[appendStreamToDb] write called with nullish arg`, {
-            collection: name,
-            pk,
-            type,
-            value,
-          });
-        }
         // [FLOCKCODE] Stamp backendUrl on every row
         if (backendUrl) {
           (value as any).backendUrl = backendUrl;
@@ -1069,18 +1061,7 @@ export function appendStreamToDb(
           (value as any).projectId = originalKey;
           (value as any)[pk] = `${backendUrl}:${originalKey}`;
         }
-        try {
-          callbacks.write({ value, type });
-        } catch (err) {
-          console.error(`[appendStreamToDb] callbacks.write threw`, {
-            collection: name,
-            pk,
-            type,
-            valueKeys: Object.keys(value),
-            value: JSON.stringify(value).slice(0, 500),
-          });
-          throw err;
-        }
+        callbacks.write({ value, type });
       },
       commit: callbacks.commit,
       markReady: callbacks.markReady,
