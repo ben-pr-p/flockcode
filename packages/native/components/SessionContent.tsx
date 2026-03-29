@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { View, Text, Pressable, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { eq } from '@tanstack/react-db';
+import { eq, useLiveQuery } from '@tanstack/react-db';
 import { SessionScreen } from './SessionScreen';
 import { SplitLayout } from './SplitLayout';
 import { SessionHeader } from './SessionHeader';
@@ -20,10 +20,10 @@ import {
   type WorktreeStatusValue,
 } from '../lib/stream-db';
 import type { Message as ServerMessage } from '../../server/src/types';
-import type { ApiClient } from '../lib/api';
-import { backendResourcesAtom } from '../lib/backend-streams';
+import { getApi, type ApiClient } from '../lib/api';
 import { useBackendStateQuery, useBackendEphemeralStateQuery } from '../lib/merged-query';
-import { MergedStateQuery, type WithBackendUrl } from '../lib/merged-query';
+import { MergedStateQuery } from '../lib/merged-query';
+import { collections } from '../lib/collections';
 import { useSessionStatus } from '../hooks/useSessionStatus';
 import { usePendingPermission } from '../hooks/usePendingPermission';
 import { useChunkedAudioRecorder, type AudioChunk } from '../hooks/useChunkedAudioRecorder';
@@ -32,7 +32,7 @@ import { useModels } from '../hooks/useModels';
 import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
 import { HandsFreeModePicker } from './HandsFreeModePicker';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import type { ModelSelection, PendingCommand, HandsFreeMode } from '../state/settings';
 import { handsFreeModeAtom } from '../state/settings';
 import type { VoicePromptResult } from '../hooks/useHandsFreeMode';
@@ -51,10 +51,6 @@ export interface AnnotatedAudioPart {
 
 /** Settings type shared by both wrappers. */
 export interface SessionSettings {
-  connection: ConnectionInfo;
-  backends: BackendConfig[];
-  setBackends: (backends: BackendConfig[]) => void;
-  connections: Record<BackendUrl, BackendConnection>;
   notificationSound: NotificationSound;
   setNotificationSound: (value: NotificationSound) => void;
   notificationSoundOptions: { label: string; value: NotificationSound }[];
@@ -149,16 +145,15 @@ export function SessionView({
   // Worktree status from the ephemeral stream
   const { data: worktreeStatusResults } = useBackendEphemeralStateQuery<WorktreeStatusValue>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ worktreeStatuses: db.collections.worktreeStatuses })
+        .from({ worktreeStatuses: collections.worktreeStatuses })
         .where(({ worktreeStatuses }) => eq(worktreeStatuses.sessionId, sessionId)),
     [sessionId]
   );
   const worktreeStatus = worktreeStatusResults?.[0];
 
-  const resources = useAtomValue(backendResourcesAtom);
-  const api = resources[backendUrl]?.api;
+  const api = getApi(backendUrl);
 
   const handleMerge = useCallback(async () => {
     if (!api) return;
@@ -183,12 +178,13 @@ export function SessionView({
   // Look up the project to derive the display name
   const { data: projectResults } = useBackendStateQuery<ProjectValue>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ projects: db.collections.projects })
-        .where(({ projects }) => eq(projects.id, session.projectID)),
+        .from({ backendProjects: collections.backendProjects })
+        .where(({ backendProjects }) => eq(backendProjects.projectId, session.projectID)),
     [session.projectID]
   );
+  // Multiple rows may match (same project on multiple backends) — take first
   const project = projectResults?.[0];
   const worktree = project?.worktree ?? '';
   const sessionDir = session.directory ?? '';
@@ -326,12 +322,14 @@ export function SessionView({
       ]);
 
       const currentSelection = lineSelectionRef.current;
-      const parts: AnnotatedAudioPart[] = [{
-        type: 'audio' as const,
-        audioData: base64,
-        mimeType,
-        lineReference: currentSelection ?? undefined,
-      }];
+      const parts: AnnotatedAudioPart[] = [
+        {
+          type: 'audio' as const,
+          audioData: base64,
+          mimeType,
+          lineReference: currentSelection ?? undefined,
+        },
+      ];
       onSendAudio(parts, effectiveModel);
       if (currentSelection) setLineSelection(null);
     },
@@ -560,9 +558,9 @@ export function SessionContent({
 }: SessionContentProps) {
   const { data: sessionResults, isLoading: sessionLoading } = useBackendStateQuery<SessionValue>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ sessions: db.collections.sessions })
+        .from({ sessions: collections.sessions })
         .where(({ sessions }) => eq(sessions.id, sessionId)),
     [sessionId]
   );
@@ -603,8 +601,7 @@ function ExistingSessionDataLoader({
   onProjectsPress: () => void;
   settings: SessionSettings;
 }) {
-  const resources = useAtomValue(backendResourcesAtom);
-  const api = resources[backendUrl]?.api;
+  const api = getApi(backendUrl);
 
   // Line selection — read current value via ref so memoized callbacks stay stable
   const lineSelection = useAtomValue(lineSelectionAtom);
@@ -615,9 +612,9 @@ function ExistingSessionDataLoader({
   // Finalized messages from the instance stream
   const { data: instanceMessages } = useBackendStateQuery<ServerMessage>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ messages: db.collections.messages })
+        .from({ messages: collections.messages })
         .where(({ messages }) => eq(messages.sessionId, sessionId)),
     [sessionId]
   );
@@ -625,10 +622,10 @@ function ExistingSessionDataLoader({
   // In-progress messages from the ephemeral stream
   const { data: ephemeralMessages } = useBackendEphemeralStateQuery<ServerMessage>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ messages: db.collections.messages })
-        .where(({ messages }) => eq(messages.sessionId, sessionId)),
+        .from({ pendingMessages: collections.pendingMessages })
+        .where(({ pendingMessages }) => eq(pendingMessages.sessionId, sessionId)),
     [sessionId]
   );
 
@@ -671,9 +668,9 @@ function ExistingSessionDataLoader({
   // File changes from the ephemeral stream (both live and finalized)
   const { data: changeResults } = useBackendEphemeralStateQuery<ChangeValue>(
     backendUrl,
-    (db, q) =>
+    (q) =>
       q
-        .from({ changes: db.collections.changes })
+        .from({ changes: collections.changes })
         .where(({ changes }) => eq(changes.sessionId, sessionId)),
     [sessionId]
   );
@@ -701,11 +698,12 @@ function ExistingSessionDataLoader({
   const handleSendAudio = useCallback(
     (parts: AnnotatedAudioPart[], model: ModelSelection | null) => {
       if (!api) return;
-      api.sessions.prompt({
-        sessionId,
-        parts,
-        ...(model ? { model } : {}),
-      })
+      api.sessions
+        .prompt({
+          sessionId,
+          parts,
+          ...(model ? { model } : {}),
+        })
         .catch((err) => {
           console.error('[SessionContent] audio prompt failed:', err);
         });
@@ -798,12 +796,23 @@ export function NewSessionContent({
 }: NewSessionContentProps) {
   const [selectedBackendUrl, setSelectedBackendUrl] = useState<BackendUrl | null>(null);
 
+  // Read backends and connections for building backend options
+  const { data: allBackends } = useLiveQuery((q) => q.from({ backends: collections.backends }), []);
+  const { data: allConnections } = useLiveQuery(
+    (q) => q.from({ bc: collections.backendConnections }),
+    []
+  );
+  const connectionsMap: Record<string, BackendConnection> = {};
+  for (const c of (allConnections as BackendConnection[] | null) ?? []) {
+    connectionsMap[c.url] = c;
+  }
+
   return (
     <MergedStateQuery<ProjectValue>
-      query={(db, q) =>
+      query={(q) =>
         q
-          .from({ projects: db.collections.projects })
-          .where(({ projects }) => eq(projects.id, projectId))
+          .from({ backendProjects: collections.backendProjects })
+          .where(({ backendProjects }) => eq(backendProjects.projectId, projectId))
       }
       deps={[projectId]}>
       {({ data: projectResults, isLoading }) => {
@@ -815,11 +824,11 @@ export function NewSessionContent({
         const backendUrlsWithProject = new Set(projectResults.map((p) => p.backendUrl));
 
         // Build BackendOption[] for all backends that host the project
-        const backendOptions: BackendOption[] = settings.backends
+        const backendOptions: BackendOption[] = ((allBackends as BackendConfig[] | null) ?? [])
           .filter((b) => b.enabled && backendUrlsWithProject.has(b.url))
           .map((config) => ({
             config,
-            connection: settings.connections[config.url],
+            connection: connectionsMap[config.url],
             hasProject: true,
           }));
 
@@ -882,8 +891,7 @@ function NewSessionDataLoader({
   selectedBackendUrl: BackendUrl;
   onSelectBackend: (url: BackendUrl) => void;
 }) {
-  const resources = useAtomValue(backendResourcesAtom);
-  const api = resources[backendUrl]?.api;
+  const api = getApi(backendUrl);
   const creatingRef = useRef(false);
   const [useWorktree, setUseWorktree] = useState(false);
   const [backendSelectorVisible, setBackendSelectorVisible] = useState(false);
@@ -897,6 +905,7 @@ function NewSessionDataLoader({
   const now = Date.now();
   const placeholderSession: SessionValue = {
     id: 'new',
+    backendUrl,
     title: 'New Session',
     directory: worktree,
     projectID: projectId,
@@ -906,10 +915,7 @@ function NewSessionDataLoader({
 
   const createAndPrompt = useCallback(
     async (
-      parts: (
-        | { type: 'text'; text: string }
-        | AnnotatedAudioPart
-      )[],
+      parts: ({ type: 'text'; text: string } | AnnotatedAudioPart)[],
       model: ModelSelection | null
     ) => {
       if (creatingRef.current || !api) return;

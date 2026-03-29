@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  TextInput,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import {
@@ -36,6 +44,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useLiveQuery } from '@tanstack/react-db';
 import type {
   SessionValue,
   SessionStatusValue,
@@ -51,10 +60,12 @@ import {
   MergedAppStateQuery,
   type WithBackendUrl,
 } from '../lib/merged-query';
-import { backendResourcesAtom } from '../lib/backend-streams';
+import { getApi, type ApiClient } from '../lib/api';
+import { collections } from '../lib/collections';
 import { pinnedSessionIdsAtom, pinnedProjectIdsAtom } from '../state/ui';
-import { backendsAtom, type BackendUrl, type BackendType } from '../state/backends';
-import type { ApiClient } from '../lib/api';
+import type { BackendConfigValue } from '../lib/stream-db';
+
+type BackendType = BackendConfigValue['type'];
 
 interface SessionsSidebarProps {
   projectId: string | undefined;
@@ -94,7 +105,7 @@ export function SessionsSidebar({
   );
 
   const handleSelectSession = useCallback(
-    (sessionId: string, pid: string, backendUrl: BackendUrl) => {
+    (sessionId: string, pid: string, backendUrl: string) => {
       router.push({
         pathname: '/projects/[projectId]/sessions/[sessionId]',
         params: { projectId: pid, sessionId, backendUrl },
@@ -138,29 +149,28 @@ export function SessionsSidebar({
       <View className="h-px bg-stone-200 dark:bg-stone-800" />
 
       {projectId ? (
-        <MergedStateQuery<SessionValue>
-          query={(db, q) => q.from({ sessions: db.collections.sessions })}>
+        <MergedStateQuery<SessionValue> query={(q) => q.from({ sessions: collections.sessions })}>
           {({ data: allSessions }) => (
             <MergedEphemeralStateQuery<SessionStatusValue>
-              query={(db, q) => q.from({ sessionStatuses: db.collections.sessionStatuses })}>
+              query={(q) => q.from({ sessionStatuses: collections.sessionStatuses })}>
               {({ data: sessionStatuses }) => (
                 <MergedEphemeralStateQuery<WorktreeStatusValue>
-                  query={(db, q) => q.from({ worktreeStatuses: db.collections.worktreeStatuses })}>
+                  query={(q) => q.from({ worktreeStatuses: collections.worktreeStatuses })}>
                   {({ data: worktreeStatuses }) => (
                     <MergedStateQuery<ServerMessage>
-                      query={(db, q) => q.from({ messages: db.collections.messages })}>
+                      query={(q) => q.from({ messages: collections.messages })}>
                       {({ data: allMessages }) => (
                         <MergedStateQuery<ProjectValue>
-                          query={(db, q) => q.from({ projects: db.collections.projects })}>
+                          query={(q) => q.from({ backendProjects: collections.backendProjects })}>
                           {({ data: allProjects }) => (
                             <MergedAppStateQuery<SessionMetaValue>
-                              query={(db, q) =>
-                                q.from({ sessionMeta: db.collections.sessionMeta })
-                              }>
+                              query={(q) => q.from({ sessionMeta: collections.sessionMeta })}>
                               {({ data: sessionMetas }) => (
                                 <MergedEphemeralStateQuery<PermissionRequestValue>
-                                  query={(db, q) =>
-                                    q.from({ permissionRequests: db.collections.permissionRequests })
+                                  query={(q) =>
+                                    q.from({
+                                      permissionRequests: collections.permissionRequests,
+                                    })
                                   }>
                                   {({ data: pendingPermissions }) => (
                                     <SessionListContent
@@ -250,7 +260,11 @@ function SessionStatusDot({
   // Pending permission takes priority — pulsing amber warning triangle
   if (hasPendingPermission) {
     return (
-      <Animated.View style={[animatedStyle, { width: 8, height: 8, alignItems: 'center', justifyContent: 'center' }]}>
+      <Animated.View
+        style={[
+          animatedStyle,
+          { width: 8, height: 8, alignItems: 'center', justifyContent: 'center' },
+        ]}>
         <AlertTriangle size={10} color="#F59E0B" fill="#F59E0B" />
       </Animated.View>
     );
@@ -329,8 +343,8 @@ interface SessionRowProps {
   worktreeStatus?: WorktreeStatusValue;
   /** Agent name used for this session (e.g. "build", "plan"). */
   agentName?: string;
-  onPress: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
-  onOverflow?: (id: string, backendUrl: BackendUrl) => void;
+  onPress: (sessionId: string, projectId: string, backendUrl: string) => void;
+  onOverflow?: (id: string, backendUrl: string) => void;
   onTogglePin: (id: string) => void;
   isArchived?: boolean;
   hasChildren?: boolean;
@@ -415,16 +429,9 @@ function SessionRow({
   const subSessionIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const pinColor = colorScheme === 'dark' ? '#D97706' : '#B45309';
   const [isArchiving, setIsArchiving] = useState(false);
-  const resources = useAtomValue(backendResourcesAtom);
-  const getApi = useCallback(
-    (backendUrl: BackendUrl): ApiClient | null => {
-      return resources[backendUrl]?.api ?? null;
-    },
-    [resources]
-  );
 
   const archiveSession = useCallback(
-    async (backendUrl: BackendUrl, sessionId: string) => {
+    async (backendUrl: string, sessionId: string) => {
       const api = getApi(backendUrl);
       if (!api) return;
       await api.sessions.archive({ sessionId });
@@ -433,7 +440,7 @@ function SessionRow({
   );
 
   const unarchiveSession = useCallback(
-    async (backendUrl: BackendUrl, sessionId: string) => {
+    async (backendUrl: string, sessionId: string) => {
       const api = getApi(backendUrl);
       if (!api) return;
       await api.sessions.unarchive({ sessionId });
@@ -557,7 +564,7 @@ function SessionListContent({
 }: {
   projectId: string;
   selectedSessionId: string | null;
-  onSelectSession: (sessionId: string, projectId: string, backendUrl: BackendUrl) => void;
+  onSelectSession: (sessionId: string, projectId: string, backendUrl: string) => void;
   /** Create a new session for the given project ID. */
   onNewSession: (projectId: string) => void;
   allSessions: TaggedSession[] | null;
@@ -585,20 +592,12 @@ function SessionListContent({
     [resolvedPinnedProjectIds]
   );
 
-  const resources = useAtomValue(backendResourcesAtom);
-  const getApi = useCallback(
-    (backendUrl: BackendUrl): ApiClient | null => {
-      return resources[backendUrl]?.api ?? null;
-    },
-    [resources]
-  );
-
   // Backend type lookup — used to show Monitor/Cloud icon in session rows
-  const backends = useAtomValue(backendsAtom);
-  const resolvedBackends = backends instanceof Promise ? [] : backends;
+  const { data: backendRows } = useLiveQuery((q) => q.from({ backends: collections.backends }), []);
+  const resolvedBackends = (backendRows as BackendConfigValue[] | null) ?? [];
   const hasMultipleBackends = resolvedBackends.filter((b) => b.enabled).length > 1;
   const backendTypeMap = useMemo(() => {
-    const map = new Map<BackendUrl, BackendType>();
+    const map = new Map<string, BackendConfigValue['type']>();
     for (const b of resolvedBackends) {
       map.set(b.url, b.type);
     }
@@ -620,7 +619,7 @@ function SessionListContent({
   );
 
   const deleteSession = useCallback(
-    async (sid: string, backendUrl: BackendUrl) => {
+    async (sid: string, backendUrl: string) => {
       const api = getApi(backendUrl);
       if (!api) return;
       try {
@@ -639,7 +638,7 @@ function SessionListContent({
   );
 
   const handleOverflow = useCallback(
-    (sid: string, backendUrl: BackendUrl) => {
+    (sid: string, backendUrl: string) => {
       const isPinned = resolvedPinnedIds.includes(sid);
       Alert.alert('Session Options', undefined, [
         {
@@ -717,12 +716,13 @@ function SessionListContent({
     [sessionMetas]
   );
 
-  // Build project name map for pinned-project session group headers
+  // Build project name map for pinned-project session group headers.
+  // Dedup by projectId since the same project can appear on multiple backends.
   const projectNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of (allProjects as ProjectValue[] | undefined) ?? []) {
       const name = p.worktree === '/' ? 'global' : p.worktree.split('/').pop() || p.worktree;
-      map.set(p.id, name);
+      map.set(p.projectId, name);
     }
     return map;
   }, [allProjects]);

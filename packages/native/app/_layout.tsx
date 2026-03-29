@@ -1,4 +1,5 @@
-import 'react-native-random-uuid';
+// Must be first import — polyfills crypto.randomUUID before TanStack DB loads
+import '../lib/polyfills';
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { View, Alert } from 'react-native';
 import { Stack, useGlobalSearchParams } from 'expo-router';

@@ -1,8 +1,7 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import { asyncStorageAdapter } from '../lib/jotai-async-storage';
-import { backendConnectionsAtom } from './backends';
 
 export const notificationSoundAtom = atom<NotificationSound>('chime');
 
@@ -16,7 +15,7 @@ export type HandsFreeMode = 'washing-dishes' | 'walking';
 export const handsFreeModeAtom = atomWithStorage<HandsFreeMode>(
   'settings:handsFreeMode',
   'washing-dishes',
-  asyncStorageAdapter<HandsFreeMode>(),
+  asyncStorageAdapter<HandsFreeMode>()
 );
 
 /** Whether hands-free (headphone button) mode is currently active. */
@@ -24,32 +23,6 @@ export const handsFreeActiveAtom = atom(false);
 
 /** Whether a native CallKit recording is in progress (headphone-initiated). */
 export const nativeRecordingAtom = atom(false);
-
-/**
- * Aggregate connection info across all backends.
- * Reports 'connected' if any backend is connected, 'reconnecting' if any is
- * reconnecting and none are connected, 'error' otherwise.
- */
-export const connectionInfoAtom = atom<ConnectionInfo>((get) => {
-  const connections = Object.values(get(backendConnectionsAtom));
-  if (connections.length === 0) {
-    return { status: 'reconnecting', latencyMs: null, error: null };
-  }
-  const connected = connections.find((c) => c.status === 'connected');
-  if (connected) {
-    return { status: 'connected', latencyMs: connected.latencyMs, error: null };
-  }
-  const reconnecting = connections.find((c) => c.status === 'reconnecting');
-  if (reconnecting) {
-    return { status: 'reconnecting', latencyMs: null, error: null };
-  }
-  const errored = connections[0];
-  return {
-    status: 'error',
-    latencyMs: null,
-    error: errored.error,
-  };
-});
 
 /** Model selection. */
 export type ModelSelection = { providerID: string; modelID: string };
@@ -61,7 +34,7 @@ export type ModelSelection = { providerID: string; modelID: string };
 export const selectedModelAtom = atomWithStorage<ModelSelection | null>(
   'settings:selectedModel',
   null,
-  asyncStorageAdapter<ModelSelection | null>(),
+  asyncStorageAdapter<ModelSelection | null>()
 );
 
 /** Model info for a single model from the provider catalog */

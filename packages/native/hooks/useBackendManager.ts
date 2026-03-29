@@ -1,392 +1,257 @@
-import { useEffect, useRef } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { loadable } from 'jotai/utils';
-import { createStreamDB } from '@durable-streams/state';
+import { useRef } from 'react';
+import { createEffect, useLiveQuery, eq } from '@tanstack/react-db';
+import { appendStreamToDb, type StreamHandle } from '../lib/durable-streams';
+import { collections, collectionEntries } from '../lib/collections';
 import {
-  backendsAtom,
-  backendConnectionsAtom,
-  type BackendConfig,
-  type BackendConnection,
-  type BackendUrl,
-} from '../state/backends';
-import { backendResourcesAtom, type BackendResources } from '../lib/backend-streams';
-import {
-  stateSchema,
-  ephemeralStateSchema,
-  appStateSchema,
-  type StateDB,
-  type EphemeralStateDB,
-  type AppStateDB,
+  STATE_STREAM_COLLECTIONS,
+  EPHEMERAL_STREAM_COLLECTIONS,
+  APP_STREAM_COLLECTIONS,
+  type BackendConfigValue,
+  type BackendConnectionValue,
 } from '../lib/stream-db';
-import { createApiClient, type ApiClient } from '../lib/api';
 
-const POLL_INTERVAL = 10_000;
-
-interface PerBackendState {
-  instanceId: string | null;
-  db: StateDB | null;
-  ephemeralDb: EphemeralStateDB | null;
-  appDb: AppStateDB | null;
-  api: ApiClient | null;
-  intervalId: ReturnType<typeof setInterval> | null;
-  abortController: AbortController | null;
-  cancelled: boolean;
-}
-
-// createApiClient is now imported from '../lib/api'
-
-/**
- * Creates a StateDB connected to a backend's ephemeral stream.
- */
-function createStateDB(url: string, instanceId: string, authToken?: string): StateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/${instanceId}`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: stateSchema,
-  }) as StateDB;
-}
-
-/**
- * Creates an EphemeralStateDB connected to a backend's ephemeral stream.
- */
-function createEphemeralStateDB(
-  url: string,
-  instanceId: string,
-  authToken?: string
-): EphemeralStateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/${instanceId}/ephemeral`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: ephemeralStateSchema,
-  }) as EphemeralStateDB;
-}
-
-/**
- * Creates an AppStateDB connected to a backend's persistent app stream.
- */
-function createAppStateDB(url: string, authToken?: string): AppStateDB {
-  const cleanUrl = url.replace(/\/$/, '');
-  return createStreamDB({
-    streamOptions: {
-      url: `${cleanUrl}/app`,
-      ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
-    },
-    state: appStateSchema,
-  }) as AppStateDB;
-}
-
-// Loadable wrapper so we can distinguish "not yet loaded" from "loaded []"
-const backendsLoadableAtom = loadable(backendsAtom);
+const POLL_INTERVAL = 5_000;
 
 /**
  * Core orchestration hook that manages connections to all enabled backends.
  *
- * Replaces useServerHealth, the debounce logic in useSettings, and the
- * implicit stream setup in stream-db.ts atoms.
- *
- * Responsibilities per enabled backend:
+ * Reads backend configs from the global DB's `backends` collection (local-only,
+ * persisted). For each enabled backend:
  * 1. Poll GET /health every 10s — returns instanceId + health status
- * 2. Detect instanceId changes (server restart) -> tear down and recreate StreamDBs
- * 3. Create oRPC API client (with auth header if authToken is set)
- * 4. Create ephemeral StreamDB at ${url}/${instanceId}
- * 5. Create persistent StreamDB at ${url}/app
- * 6. Write results to backendConnectionsAtom and backendResourcesAtom
+ * 2. Write connection status to `backendConnections` collection
+ * 3. Detect instanceId changes (server restart) -> close instance-scoped
+ *    streams, create new ones against the new instanceId
+ * 4. Attach state/ephemeral/app streams to the global DB with backendUrl stamping
  *
  * Mount once at the app root.
  */
+type StopPollingFn = () => void;
+type BackendStateContainer = {
+  url: string;
+  authToken: string | null;
+  stopPollingFn: StopPollingFn;
+};
 export function useBackendManager() {
-  const backendsLoadable = useAtomValue(backendsLoadableAtom);
-  const setConnections = useSetAtom(backendConnectionsAtom);
-  const setResources = useSetAtom(backendResourcesAtom);
+  const backendPolls = useRef<Record<string, BackendStateContainer>>({});
 
-  // Track per-backend state across renders
-  const stateRef = useRef<Map<BackendUrl, PerBackendState>>(new Map());
+  const { data: backendConfigs } = useLiveQuery(
+    (q) => q.from({ backends: collections.backends }),
+    []
+  );
 
-  useEffect(() => {
-    // Wait for AsyncStorage to resolve before acting
-    if (backendsLoadable.state !== 'hasData') return;
-
-    const enabledBackends = backendsLoadable.data.filter((b) => b.enabled);
-    const enabledUrls = new Set(enabledBackends.map((b) => b.url));
-
-    // Compute action buckets against the ref now (inside the effect, always current)
-    const toTearDown = [...stateRef.current.keys()].filter((url) => !enabledUrls.has(url));
-    const toStart = enabledBackends.filter((b) => !stateRef.current.has(b.url));
-    const _alreadyRunning = enabledBackends.filter((b) => stateRef.current.has(b.url));
-
-    // --- Tear down removed backends ---
-    for (const url of toTearDown) {
-      const state = stateRef.current.get(url);
-      if (state) tearDown(state);
-      stateRef.current.delete(url);
-    }
-    if (toTearDown.length > 0) {
-      setConnections((prev) => {
-        const next = { ...prev };
-        for (const url of toTearDown) delete next[url];
-        return next;
-      });
-      setResources((prev) => {
-        const next = { ...prev };
-        for (const url of toTearDown) delete next[url];
-        return next;
-      });
-    }
-
-    // --- Initialize and start polling for new backends ---
-    for (const backend of toStart) {
-      const perBackend: PerBackendState = {
-        instanceId: null,
-        db: null,
-        ephemeralDb: null,
-        appDb: null,
-        api: null,
-        intervalId: null,
-        abortController: null,
-        cancelled: false,
+  /**
+   * Start polling for each enabled backend on mount or enable
+   * Stop polling for removed or disabled backends
+   * TODO: Need to think through auth/url changing (can key polling by map)
+   */
+  createEffect({
+    query: (q) =>
+      q.from({ backends: collections.backends }).where((b) => eq(b.backends.enabled, true)),
+    skipInitial: false,
+    onEnter(result) {
+      const backend = result.value as BackendConfigValue;
+      // Guard against duplicate onEnter (e.g. React strict mode re-renders)
+      if (backendPolls.current[backend.id]) return;
+      backendPolls.current[backend.id] = {
+        url: backend.url,
+        authToken: backend.authToken ?? null,
+        stopPollingFn: startPolling(backend),
       };
-      // Register in ref immediately so subsequent renders see it as already running
-      stateRef.current.set(backend.url, perBackend);
-
-      // Set initial connection state
-      setConnections((prev) => ({
-        ...prev,
-        [backend.url]: {
+    },
+    onUpdate(result) {
+      const backend = result.value as BackendConfigValue;
+      const prior = backendPolls.current[backend.id];
+      if (!prior) {
+        // polling never set up before (unexpected on update)
+        console.warn(`Polling not set up for backend ${backend.id}`);
+        backendPolls.current[backend.id] = {
           url: backend.url,
-          status: 'reconnecting',
-          instanceId: null,
-          latencyMs: null,
-          error: null,
-        } satisfies BackendConnection,
-      }));
-
-      // Create API client and set initial resources
-      perBackend.api = createApiClient(backend.url, backend.authToken);
-      setResources((prev) => ({
-        ...prev,
-        [backend.url]: {
+          authToken: backend.authToken ?? null,
+          stopPollingFn: startPolling(backend),
+        };
+      } else if (backend.url !== prior.url || backend.authToken !== prior.authToken) {
+        // url or auth token changed — restart polling
+        prior.stopPollingFn();
+        backendPolls.current[backend.id] = {
           url: backend.url,
-          db: null,
-          ephemeralDb: null,
-          appDb: null,
-          api: perBackend.api,
-          loading: true,
-        } satisfies BackendResources,
-      }));
-
-      startPolling(backend, perBackend, setConnections, setResources);
-    }
-    // backendsLoadable changes identity each render when state is 'loading';
-    // only re-run when it transitions to hasData or the data itself changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backendsLoadable.state === 'hasData' ? backendsLoadable.data : null]);
-
-  // Tear down all backends only on unmount
-  useEffect(() => {
-    return () => {
-      for (const [, state] of stateRef.current) {
-        tearDown(state);
+          authToken: backend.authToken ?? null,
+          stopPollingFn: startPolling(backend),
+        };
+      } else {
+        // something like name changed, we don't need to do anything
       }
-      stateRef.current.clear();
-    };
-  }, []);
+    },
+    onExit(result) {
+      const backend = result.value as BackendConfigValue;
+      if (backendPolls.current[backend.id]) {
+        backendPolls.current[backend.id].stopPollingFn();
+        delete backendPolls.current[backend.id];
+      }
+    },
+  });
 }
 
-function startPolling(
-  backend: BackendConfig,
-  state: PerBackendState,
-  setConnections: (
-    fn: (prev: Record<string, BackendConnection>) => Record<string, BackendConnection>
-  ) => void,
-  setResources: (
-    fn: (prev: Record<string, BackendResources>) => Record<string, BackendResources>
-  ) => void
-) {
+/**
+ * Write or delete a backend connection status in the global DB's
+ * backendConnections collection.
+ */
+function updateConnection(url: string, value: BackendConnectionValue | null) {
+  if (value === null) {
+    try {
+      collections.backendConnections.delete(url);
+    } catch {
+      /* ignore if not found */
+    }
+  } else {
+    try {
+      collections.backendConnections.insert(value);
+    } catch {
+      // Already exists — update instead
+      collections.backendConnections.update(url, (draft: any) => {
+        Object.assign(draft, value);
+      });
+    }
+  }
+}
+
+function authHeaders(authToken?: string): Record<string, string> {
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {};
+}
+
+/**
+ * Start polling a backend's /health endpoint. Returns a teardown function
+ * that cancels polling and closes all streams.
+ */
+function startPolling(backend: BackendConfigValue): () => void {
+  let instanceId: string | null = null;
+  let stateStream: StreamHandle | null = null;
+  let ephemeralStream: StreamHandle | null = null;
+  let appStream: StreamHandle | null = null;
+  let cancelled = false;
+
+  const cleanBaseUrl = backend.url.replace(/\/$/, '');
+
+  /** Attach a stream, logging errors instead of throwing. */
+  function attachStream(
+    pathSuffix: string,
+    collectionNames: readonly string[]
+  ): StreamHandle | null {
+    try {
+      const s = appendStreamToDb(collectionEntries, {
+        streamOptions: {
+          url: `${cleanBaseUrl}${pathSuffix}`,
+          headers: authHeaders(backend.authToken),
+        },
+        collectionNames: [...collectionNames],
+        backendUrl: backend.url,
+      });
+      console.log(`[poll] Preload starting: ${pathSuffix}`, backend.url);
+      s.preload().then(
+        () => console.log(`[poll] Preload completed: ${pathSuffix}`, backend.url),
+        (err) => console.error(`[poll] Preload failed: ${pathSuffix}`, backend.url, err)
+      );
+      return s;
+    } catch (err) {
+      console.error(
+        `[useBackendManager] Failed to attach stream ${pathSuffix} for ${backend.url}:`,
+        err
+      );
+      return null;
+    }
+  }
+
   async function poll() {
-    if (state.cancelled) return;
+    if (cancelled) return;
 
-    state.abortController?.abort();
-    const controller = new AbortController();
-    state.abortController = controller;
-
-    const url = backend.url.replace(/\/$/, '') + '/health';
     const start = Date.now();
 
     try {
-      const headers: Record<string, string> = {};
-      if (backend.authToken) {
-        headers.Authorization = `Bearer ${backend.authToken}`;
-      }
-
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers,
+      const res = await fetch(cleanBaseUrl + '/health', {
+        headers: authHeaders(backend.authToken),
       });
-      if (state.cancelled) return;
+
+      if (cancelled) return;
 
       if (!res.ok) {
-        setConnections((prev) => ({
-          ...prev,
-          [backend.url]: {
-            ...prev[backend.url],
-            status: 'error',
-            latencyMs: null,
-            error: `HTTP ${res.status}`,
-          } as BackendConnection,
-        }));
+        updateConnection(backend.url, {
+          url: backend.url,
+          status: 'error',
+          instanceId,
+          latencyMs: null,
+          error: `HTTP ${res.status}`,
+        });
         return;
       }
 
       const latency = Date.now() - start;
+
+      // Server is reachable — mark connected immediately
+      updateConnection(backend.url, {
+        url: backend.url,
+        status: 'connected',
+        instanceId,
+        latencyMs: latency,
+        error: null,
+      });
+
       const data = await res.json();
       const newInstanceId = data.instanceId as string | undefined;
 
       console.log('[poll]', {
         newInstanceId,
-        currentInstanceId: state.instanceId,
-        willCreateDB: !!(newInstanceId && newInstanceId !== state.instanceId),
+        currentInstanceId: instanceId,
+        willAttachStreams: !!(newInstanceId && newInstanceId !== instanceId),
       });
 
       // Detect instanceId change (server restart)
-      if (newInstanceId && newInstanceId !== state.instanceId) {
-        // Tear down old instance-scoped StreamDBs
-        if (state.db) {
-          try {
-            state.db.close();
-          } catch {
-            /* ignore */
-          }
-        }
-        if (state.ephemeralDb) {
-          try {
-            state.ephemeralDb.close();
-          } catch {
-            /* ignore */
-          }
-        }
+      if (newInstanceId && newInstanceId !== instanceId) {
+        // Close old instance-scoped streams (state + ephemeral)
+        closeStreamSafe(stateStream);
+        closeStreamSafe(ephemeralStream);
+        stateStream = null;
+        ephemeralStream = null;
 
-        state.instanceId = newInstanceId;
+        instanceId = newInstanceId;
 
-        // Create new instance StreamDB (finalized, replayable state)
-        try {
-          const db = createStateDB(backend.url, newInstanceId, backend.authToken);
-          await db.preload();
-          state.db = db;
-          console.log('[poll] StateDB created', backend.url);
-        } catch (err) {
-          console.error(`[useBackendManager] Failed to create StateDB for ${backend.url}:`, err);
-          state.db = null;
+        stateStream = attachStream(`/${newInstanceId}`, STATE_STREAM_COLLECTIONS);
+
+        ephemeralStream = attachStream(`/${newInstanceId}/ephemeral`, EPHEMERAL_STREAM_COLLECTIONS);
+
+        // Attach app stream only once — survives instanceId changes
+        if (!appStream) {
+          appStream = attachStream('/app', APP_STREAM_COLLECTIONS);
         }
-
-        // Create new ephemeral StreamDB (live-only UI state)
-        try {
-          const ephemeralDb = createEphemeralStateDB(
-            backend.url,
-            newInstanceId,
-            backend.authToken
-          );
-          await ephemeralDb.preload();
-          state.ephemeralDb = ephemeralDb;
-          console.log('[poll] EphemeralStateDB created', backend.url);
-        } catch (err) {
-          console.error(
-            `[useBackendManager] Failed to create EphemeralStateDB for ${backend.url}:`,
-            err
-          );
-          state.ephemeralDb = null;
-        }
-
-        // Create persistent app StreamDB (only once — /app stream survives restarts)
-        if (!state.appDb) {
-          try {
-            const appDb = createAppStateDB(backend.url, backend.authToken);
-            await appDb.preload();
-            state.appDb = appDb;
-            console.log('[poll] AppStateDB created', backend.url);
-          } catch (err) {
-            console.error(
-              `[useBackendManager] Failed to create AppStateDB for ${backend.url}:`,
-              err
-            );
-            state.appDb = null;
-          }
-        }
-
-        // Publish updated resources
-        setResources((prev) => ({
-          ...prev,
-          [backend.url]: {
-            url: backend.url,
-            db: state.db,
-            ephemeralDb: state.ephemeralDb,
-            appDb: state.appDb,
-            api: state.api,
-            loading: false,
-          } satisfies BackendResources,
-        }));
       }
-
-      // Update connection status
-      setConnections((prev) => ({
-        ...prev,
-        [backend.url]: {
-          url: backend.url,
-          status: 'connected',
-          instanceId: newInstanceId ?? state.instanceId,
-          latencyMs: latency,
-          error: null,
-        } satisfies BackendConnection,
-      }));
     } catch (err: any) {
-      if (state.cancelled) return;
-      if (err.name === 'AbortError') return;
+      if (cancelled) return;
 
-      setConnections((prev) => ({
-        ...prev,
-        [backend.url]: {
-          ...prev[backend.url],
-          status: 'error',
-          latencyMs: null,
-          error: err.message || 'Connection failed',
-        } as BackendConnection,
-      }));
+      updateConnection(backend.url, {
+        url: backend.url,
+        status: 'error',
+        instanceId,
+        latencyMs: null,
+        error: err.message || 'Connection failed',
+      });
     }
   }
 
-  // Initial poll immediately, then on interval
   poll();
-  state.intervalId = setInterval(poll, POLL_INTERVAL);
+  const intervalId = setInterval(poll, POLL_INTERVAL);
+
+  return () => {
+    cancelled = true;
+    clearInterval(intervalId);
+    closeStreamSafe(stateStream);
+    closeStreamSafe(ephemeralStream);
+    closeStreamSafe(appStream);
+  };
 }
 
-function tearDown(state: PerBackendState) {
-  state.cancelled = true;
-  if (state.intervalId) clearInterval(state.intervalId);
-  state.abortController?.abort();
-  if (state.db) {
-    try {
-      state.db.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  if (state.ephemeralDb) {
-    try {
-      state.ephemeralDb.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  if (state.appDb) {
-    try {
-      state.appDb.close();
-    } catch {
-      /* ignore */
-    }
+function closeStreamSafe(handle: StreamHandle | null) {
+  if (!handle) return;
+  try {
+    handle.close();
+  } catch {
+    /* ignore */
   }
 }
