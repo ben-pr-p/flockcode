@@ -993,13 +993,14 @@ export interface AppendStreamOptions {
    * This lets queries join/filter by backend without the server knowing its own URL.
    */
   backendUrl?: string;
-  /**
-   * Collections whose key should be rewritten as `${backendUrl}:${originalKey}`.
-   * Used for backendProjects where the same project ID can exist on multiple backends.
-   * The original key is also stored as `projectId` on the value.
-   */
-  compositeKeyCollections?: Set<string>;
 }
+
+/**
+ * Collections whose primary key should be rewritten as `${backendUrl}:${originalKey}`.
+ * Used for backendProjects where the same project ID can exist on multiple backends.
+ * The original key is also stored as `projectId` on the value.
+ */
+const COMPOSITE_KEY_COLLECTIONS = new Set(['backendProjects']);
 
 /**
  * Attach a DurableStream to an existing multi-stream DB.
@@ -1014,7 +1015,7 @@ export function appendStreamToDb(
   entries: Record<string, CollectionEntry>,
   options: AppendStreamOptions
 ): StreamHandle {
-  const { streamOptions, collectionNames, backendUrl, compositeKeyCollections } = options;
+  const { streamOptions, collectionNames, backendUrl } = options;
 
   // Create a stream handle (lightweight, doesn't connect until stream() is called)
   const stream = new DurableStreamClass(streamOptions);
@@ -1041,13 +1042,21 @@ export function appendStreamToDb(
     }
 
     // [FLOCKCODE] Determine if this collection needs composite keys
-    const needsCompositeKey = compositeKeyCollections?.has(name) ?? false;
+    const needsCompositeKey = COMPOSITE_KEY_COLLECTIONS.has(name);
     const pk = entry.definition.primaryKey;
 
     // Register this collection's sync callbacks with the dispatcher
     dispatcher.registerHandler(entry.definition.type, {
       begin: callbacks.begin,
       write: (value, type) => {
+        if (value == null || type == null) {
+          console.error(`[appendStreamToDb] write called with nullish arg`, {
+            collection: name,
+            pk,
+            type,
+            value,
+          });
+        }
         // [FLOCKCODE] Stamp backendUrl on every row
         if (backendUrl) {
           (value as any).backendUrl = backendUrl;
@@ -1060,7 +1069,18 @@ export function appendStreamToDb(
           (value as any).projectId = originalKey;
           (value as any)[pk] = `${backendUrl}:${originalKey}`;
         }
-        callbacks.write({ value, type });
+        try {
+          callbacks.write({ value, type });
+        } catch (err) {
+          console.error(`[appendStreamToDb] callbacks.write threw`, {
+            collection: name,
+            pk,
+            type,
+            valueKeys: Object.keys(value),
+            value: JSON.stringify(value).slice(0, 500),
+          });
+          throw err;
+        }
       },
       commit: callbacks.commit,
       markReady: callbacks.markReady,
