@@ -26,7 +26,7 @@ import type {
   WorktreeStatusValue,
   PermissionRequestValue,
 } from '../lib/stream-db';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import type { LeftPanelContent } from '../state/ui';
 import type { RecordingState, AudioChunk } from '../hooks/useChunkedAudioRecorder';
 import type { PendingCommand } from '../state/settings';
@@ -61,7 +61,6 @@ interface SplitLayoutProps {
   };
   onAbort?: () => void;
   settings: {
-    connection: ConnectionInfo;
     notificationSound: NotificationSound;
     setNotificationSound: (value: NotificationSound) => void;
     notificationSoundOptions: { label: string; value: NotificationSound }[];
@@ -309,7 +308,6 @@ export function SplitLayout({
               elevation: 16,
             }}>
             <SettingsScreen
-              connection={settings.connection}
               notificationSound={settings.notificationSound}
               onNotificationSoundChange={settings.setNotificationSound}
               notificationSoundOptions={settings.notificationSoundOptions}

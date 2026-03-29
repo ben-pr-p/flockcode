@@ -5,11 +5,10 @@ import { useColorScheme } from 'nativewind';
 import { useLiveQuery } from '@tanstack/react-db';
 import { ArrowLeft, ChevronDown, Monitor, Cloud, Plus, Pencil, Trash2 } from 'lucide-react-native';
 import { collections } from '../lib/collections';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import type { BackendConfig, BackendType, BackendConnection } from '../state/backends';
 
 interface SettingsScreenProps {
-  connection: ConnectionInfo;
   notificationSound: NotificationSound;
   onNotificationSoundChange: (value: NotificationSound) => void;
   notificationSoundOptions: { label: string; value: NotificationSound }[];
@@ -18,7 +17,6 @@ interface SettingsScreenProps {
 }
 
 export function SettingsScreen({
-  connection,
   notificationSound,
   onNotificationSoundChange,
   notificationSoundOptions,

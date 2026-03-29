@@ -32,7 +32,7 @@ import { useModels } from '../hooks/useModels';
 import { useAgents } from '../hooks/useAgents';
 import { useCommands } from '../hooks/useCommands';
 import { HandsFreeModePicker } from './HandsFreeModePicker';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import type { ModelSelection, PendingCommand, HandsFreeMode } from '../state/settings';
 import { handsFreeModeAtom } from '../state/settings';
 import type { VoicePromptResult } from '../hooks/useHandsFreeMode';
@@ -51,7 +51,6 @@ export interface AnnotatedAudioPart {
 
 /** Settings type shared by both wrappers. */
 export interface SessionSettings {
-  connection: ConnectionInfo;
   notificationSound: NotificationSound;
   setNotificationSound: (value: NotificationSound) => void;
   notificationSoundOptions: { label: string; value: NotificationSound }[];

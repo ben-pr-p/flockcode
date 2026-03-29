@@ -1,9 +1,7 @@
 import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
-import type { ConnectionInfo, NotificationSound } from '../__fixtures__/settings';
+import type { NotificationSound } from '../__fixtures__/settings';
 import { asyncStorageAdapter } from '../lib/jotai-async-storage';
-import { collections } from '../lib/collections';
-import type { BackendConnectionValue } from '../lib/stream-db';
 
 export const notificationSoundAtom = atom<NotificationSound>('chime');
 
@@ -25,34 +23,6 @@ export const handsFreeActiveAtom = atom(false);
 
 /** Whether a native CallKit recording is in progress (headphone-initiated). */
 export const nativeRecordingAtom = atom(false);
-
-/**
- * Aggregate connection info across all backends.
- * Reports 'connected' if any backend is connected, 'reconnecting' if any is
- * reconnecting and none are connected, 'error' otherwise.
- */
-export const connectionInfoAtom = atom<ConnectionInfo>(() => {
-  // Read connections directly from the global DB collection (synchronous)
-  const connectionsCollection = collections.backendConnections as any;
-  const connections = (connectionsCollection.toArray ?? []) as BackendConnectionValue[];
-  if (connections.length === 0) {
-    return { status: 'reconnecting', latencyMs: null, error: null };
-  }
-  const connected = connections.find((c) => c.status === 'connected');
-  if (connected) {
-    return { status: 'connected', latencyMs: connected.latencyMs, error: null };
-  }
-  const reconnecting = connections.find((c) => c.status === 'reconnecting');
-  if (reconnecting) {
-    return { status: 'reconnecting', latencyMs: null, error: null };
-  }
-  const errored = connections[0];
-  return {
-    status: 'error',
-    latencyMs: null,
-    error: errored.error,
-  };
-});
 
 /** Model selection. */
 export type ModelSelection = { providerID: string; modelID: string };

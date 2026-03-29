@@ -2,15 +2,9 @@ import React from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { Menu, FolderOpen, GitMerge, Check, CircleDot, Monitor, Cloud } from 'lucide-react-native';
 import { useColorScheme } from 'nativewind';
-import { useAtomValue } from 'jotai';
-import { useLiveQuery } from '@tanstack/react-db';
-import { connectionInfoAtom } from '../state/settings';
+import { useLiveQuery, eq } from '@tanstack/react-db';
 import { collections } from '../lib/collections';
-import type {
-  BackendConfigValue,
-  BackendConnectionValue,
-  WorktreeStatusValue,
-} from '../lib/stream-db';
+import type { WorktreeStatusValue } from '../lib/stream-db';
 
 interface SessionHeaderProps {
   projectName: string;
@@ -42,19 +36,18 @@ export function SessionHeader({
 }: SessionHeaderProps) {
   const { colorScheme } = useColorScheme();
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C';
-  const connection = useAtomValue(connectionInfoAtom);
-  const { data: backendRows } = useLiveQuery((q) => q.from({ backends: collections.backends }), []);
-  const resolvedBackends = (backendRows as BackendConfigValue[] | null) ?? [];
-  const { data: connectionRows } = useLiveQuery(
-    (q) => q.from({ bc: collections.backendConnections }),
+  const { data: backendsWithConnections } = useLiveQuery(
+    (q) =>
+      q
+        .from({ b: collections.backends })
+        .leftJoin({ bc: collections.backendConnections }, ({ b, bc }) => eq(b.url, bc.url)),
     []
   );
-  const connections: Record<string, BackendConnectionValue> = {};
-  for (const c of (connectionRows as BackendConnectionValue[] | null) ?? []) {
-    connections[c.url] = c;
-  }
-  const dotColor = connection.status === 'connected' ? 'bg-green-500' : 'bg-red-500';
-  const hasMultipleBackends = resolvedBackends.filter((b) => b.enabled).length > 1;
+  const rows = backendsWithConnections ?? [];
+  const enabledRows = rows.filter((r) => r.b.enabled);
+  const anyConnected = enabledRows.some((r) => r.bc?.status === 'connected');
+  const dotColor = anyConnected ? 'bg-green-500' : 'bg-red-500';
+  const hasMultipleBackends = enabledRows.length > 1;
 
   const isWorktree = worktreeStatus?.isWorktreeSession && !worktreeStatus.error;
 
@@ -67,7 +60,7 @@ export function SessionHeader({
   // Derive the server name for the info bar (only shown when multiple backends)
   const serverName =
     hasMultipleBackends && backendUrl
-      ? (resolvedBackends.find((b) => b.url === backendUrl)?.name ?? null)
+      ? (enabledRows.find((r) => r.b.url === backendUrl)?.b.name ?? null)
       : null;
 
   return (
@@ -92,28 +85,25 @@ export function SessionHeader({
           </Text>
           {hasMultipleBackends && (
             <View className="flex-row items-center gap-1">
-              {resolvedBackends
-                .filter((b) => b.enabled)
-                .map((b) => {
-                  const conn = connections[b.url];
-                  const isConnected = conn?.status === 'connected';
-                  const Icon = b.type === 'local' ? Monitor : Cloud;
-                  return (
-                    <Icon
-                      key={b.url}
-                      size={12}
-                      color={
-                        isConnected
-                          ? colorScheme === 'dark'
-                            ? '#A8A29E'
-                            : '#44403C'
-                          : colorScheme === 'dark'
-                            ? '#44403C'
-                            : '#D6D3D1'
-                      }
-                    />
-                  );
-                })}
+              {enabledRows.map((r) => {
+                const isConnected = r.bc?.status === 'connected';
+                const Icon = r.b.type === 'local' ? Monitor : Cloud;
+                return (
+                  <Icon
+                    key={r.b.url}
+                    size={12}
+                    color={
+                      isConnected
+                        ? colorScheme === 'dark'
+                          ? '#A8A29E'
+                          : '#44403C'
+                        : colorScheme === 'dark'
+                          ? '#44403C'
+                          : '#D6D3D1'
+                    }
+                  />
+                );
+              })}
             </View>
           )}
         </View>

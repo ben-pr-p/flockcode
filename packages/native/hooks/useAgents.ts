@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useLiveQuery, eq } from '@tanstack/react-db';
-import { agentCatalogAtom, connectionInfoAtom, type AgentInfo } from '../state/settings';
+import { agentCatalogAtom, type AgentInfo } from '../state/settings';
 import { collections } from '../lib/collections';
 import { getApi } from '../lib/api';
 import type { BackendConnectionValue } from '../lib/stream-db';

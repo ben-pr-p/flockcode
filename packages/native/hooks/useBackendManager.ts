@@ -145,8 +145,11 @@ function startPolling(backend: BackendConfigValue): () => void {
         collectionNames: [...collectionNames],
         backendUrl: backend.url,
       });
-      s.preload();
-      console.log(`[poll] Stream attached: ${pathSuffix}`, backend.url);
+      console.log(`[poll] Preload starting: ${pathSuffix}`, backend.url);
+      s.preload().then(
+        () => console.log(`[poll] Preload completed: ${pathSuffix}`, backend.url),
+        (err) => console.error(`[poll] Preload failed: ${pathSuffix}`, backend.url, err)
+      );
       return s;
     } catch (err) {
       console.error(

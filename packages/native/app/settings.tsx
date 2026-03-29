@@ -13,7 +13,6 @@ export default function SettingsModal() {
 
   return (
     <SettingsScreen
-      connection={settings.connection}
       notificationSound={settings.notificationSound}
       onNotificationSoundChange={settings.setNotificationSound}
       notificationSoundOptions={settings.notificationSoundOptions}
