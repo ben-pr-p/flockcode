@@ -3,8 +3,9 @@ import { View, Text, Pressable, ScrollView, TextInput, Switch, Alert } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { useLiveQuery } from '@tanstack/react-db';
-import { ArrowLeft, ChevronDown, Monitor, Cloud, Plus, Pencil, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, ChevronDown, Monitor, Cloud, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react-native';
 import { collections } from '../lib/collections';
+import { useInsertPing } from '../hooks/useBackendManager';
 import type { NotificationSound } from '../__fixtures__/settings';
 import type { BackendConfig, BackendType, BackendConnection } from '../state/backends';
 
@@ -28,6 +29,7 @@ export function SettingsScreen({
   const iconColor = colorScheme === 'dark' ? '#A8A29E' : '#44403C';
   const mutedIconColor = colorScheme === 'dark' ? '#57534E' : '#A8A29E';
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  const { insertPing } = useInsertPing();
 
   // Read backends and connections from collections
   const { data: backendRows } = useLiveQuery((q) => q.from({ backends: collections.backends }), []);
@@ -107,6 +109,7 @@ export function SettingsScreen({
               isEditing={editingUrl === backend.id}
               onEdit={() => setEditingUrl(editingUrl === backend.id ? null : backend.id)}
               onDelete={() => handleDeleteBackend(backend.id, backend.name)}
+              onPing={insertPing}
             />
           ))}
 
@@ -209,9 +212,10 @@ interface BackendEntryProps {
   isEditing: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onPing: (backendUrl: string) => void;
 }
 
-function BackendEntry({ backend, connection, isEditing, onEdit, onDelete }: BackendEntryProps) {
+function BackendEntry({ backend, connection, isEditing, onEdit, onDelete, onPing }: BackendEntryProps) {
   const onUpdate = useCallback(
     (updates: Partial<BackendConfig>) => {
       collections.backends.update(backend.id, (draft: any) => {
@@ -271,6 +275,9 @@ function BackendEntry({ backend, connection, isEditing, onEdit, onDelete }: Back
             </Text>
           </View>
         </View>
+        <Pressable onPress={() => onPing(backend.url)} hitSlop={8}>
+          <RefreshCw size={16} color={mutedIconColor} />
+        </Pressable>
         <Pressable onPress={onEdit} hitSlop={8}>
           <Pencil size={16} color={mutedIconColor} />
         </Pressable>

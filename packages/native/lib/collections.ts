@@ -32,6 +32,7 @@ import type {
   SessionMetaValue,
   BackendConfigValue,
   BackendConnectionValue,
+  PingValue,
 } from './stream-db';
 import type { Message } from '../../server/src/types';
 
@@ -212,6 +213,12 @@ const _backendConnections = createLocalEphemeralCollection<BackendConnectionValu
   (item) => String(item.url)
 );
 
+const _pings = createLocalEphemeralCollection<PingValue>(
+  'pings',
+  globalStateDef.pings,
+  (item) => item.url
+);
+
 // ---------------------------------------------------------------------------
 // Exported collections object — import this in components and hooks
 // ---------------------------------------------------------------------------
@@ -236,6 +243,7 @@ export const collections = {
   permissionRequests: _permissionRequests.collection,
   backends: _backends.collection,
   backendConnections: _backendConnections.collection,
+  pings: _pings.collection,
 };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +263,7 @@ export const collectionEntries = {
   permissionRequests: _permissionRequests,
   backends: _backends,
   backendConnections: _backendConnections,
+  pings: _pings,
 };
 
 export { STATE_STREAM_COLLECTIONS, EPHEMERAL_STREAM_COLLECTIONS, APP_STREAM_COLLECTIONS };

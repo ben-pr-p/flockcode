@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useCallback } from 'react';
 import { createEffect, useLiveQuery, eq } from '@tanstack/react-db';
 import { appendStreamToDb, type StreamHandle } from '../lib/durable-streams';
 import { collections, collectionEntries } from '../lib/collections';
@@ -25,70 +26,266 @@ const POLL_INTERVAL = 5_000;
  *
  * Mount once at the app root.
  */
-type StopPollingFn = () => void;
+class BackendPoller {
+  private instanceId: string | null = null;
+  private stateStream: StreamHandle | null = null;
+  private ephemeralStream: StreamHandle | null = null;
+  private appStream: StreamHandle | null = null;
+  private cancelled = false;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private cleanBaseUrl: string;
+
+  constructor(private backend: BackendConfigValue) {
+    this.cleanBaseUrl = backend.url.replace(/\/$/, '');
+    this.start();
+  }
+
+  private attachStream(
+    pathSuffix: string,
+    collectionNames: readonly string[]
+  ): StreamHandle | null {
+    try {
+      const s = appendStreamToDb(collectionEntries, {
+        streamOptions: {
+          url: `${this.cleanBaseUrl}${pathSuffix}`,
+          headers: authHeaders(this.backend.authToken),
+        },
+        collectionNames: [...collectionNames],
+        backendUrl: this.backend.url,
+      });
+      console.log(`[poll] Preload starting: ${pathSuffix}`, this.backend.url);
+      s.preload().then(
+        () => console.log(`[poll] Preload completed: ${pathSuffix}`, this.backend.url),
+        (err) => console.error(`[poll] Preload failed: ${pathSuffix}`, this.backend.url, err)
+      );
+      return s;
+    } catch (err) {
+      console.error(
+        `[useBackendManager] Failed to attach stream ${pathSuffix} for ${this.backend.url}:`,
+        err
+      );
+      return null;
+    }
+  }
+
+  private async poll() {
+    if (this.cancelled) return;
+
+    const start = Date.now();
+
+    try {
+      const res = await fetch(this.cleanBaseUrl + '/health', {
+        headers: authHeaders(this.backend.authToken),
+      });
+
+      if (this.cancelled) return;
+
+      if (!res.ok) {
+        updateConnection(this.backend.url, {
+          url: this.backend.url,
+          status: 'error',
+          instanceId: this.instanceId,
+          latencyMs: null,
+          error: `HTTP ${res.status}`,
+        });
+        return;
+      }
+
+      const latency = Date.now() - start;
+
+      updateConnection(this.backend.url, {
+        url: this.backend.url,
+        status: 'connected',
+        instanceId: this.instanceId,
+        latencyMs: latency,
+        error: null,
+      });
+
+      const data = await res.json();
+      const newInstanceId = data.instanceId as string | undefined;
+
+      console.log('[poll]', {
+        newInstanceId,
+        currentInstanceId: this.instanceId,
+        willAttachStreams: !!(newInstanceId && newInstanceId !== this.instanceId),
+      });
+
+      if (newInstanceId && newInstanceId !== this.instanceId) {
+        closeStreamSafe(this.stateStream);
+        closeStreamSafe(this.ephemeralStream);
+        this.stateStream = null;
+        this.ephemeralStream = null;
+
+        this.instanceId = newInstanceId;
+
+        this.stateStream = this.attachStream(`/${newInstanceId}`, STATE_STREAM_COLLECTIONS);
+        this.ephemeralStream = this.attachStream(
+          `/${newInstanceId}/ephemeral`,
+          EPHEMERAL_STREAM_COLLECTIONS
+        );
+
+        if (!this.appStream) {
+          this.appStream = this.attachStream('/app', APP_STREAM_COLLECTIONS);
+        }
+      }
+    } catch (err: any) {
+      if (this.cancelled) return;
+
+      updateConnection(this.backend.url, {
+        url: this.backend.url,
+        status: 'error',
+        instanceId: this.instanceId,
+        latencyMs: null,
+        error: err.message || 'Connection failed',
+      });
+    }
+  }
+
+  start() {
+    this.poll();
+    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL);
+  }
+
+  ping() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+    }
+    this.poll();
+    this.intervalId = setInterval(() => this.poll(), POLL_INTERVAL);
+  }
+
+  stop() {
+    this.cancelled = true;
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    closeStreamSafe(this.stateStream);
+    closeStreamSafe(this.ephemeralStream);
+    closeStreamSafe(this.appStream);
+  }
+}
+
 type BackendStateContainer = {
   url: string;
   authToken: string | null;
-  stopPollingFn: StopPollingFn;
+  poller: BackendPoller;
 };
 export function useBackendManager() {
   const backendPolls = useRef<Record<string, BackendStateContainer>>({});
 
-  const { data: backendConfigs } = useLiveQuery(
-    (q) => q.from({ backends: collections.backends }),
-    []
-  );
-
-  /**
-   * Start polling for each enabled backend on mount or enable
-   * Stop polling for removed or disabled backends
-   * TODO: Need to think through auth/url changing (can key polling by map)
-   */
   createEffect({
-    query: (q) =>
-      q.from({ backends: collections.backends }).where((b) => eq(b.backends.enabled, true)),
+    query(q) {
+      return q.from({ backends: collections.backends }).where((b) => eq(b.backends.enabled, true));
+    },
     skipInitial: false,
     onEnter(result) {
       const backend = result.value as BackendConfigValue;
-      // Guard against duplicate onEnter (e.g. React strict mode re-renders)
       if (backendPolls.current[backend.id]) return;
       backendPolls.current[backend.id] = {
         url: backend.url,
         authToken: backend.authToken ?? null,
-        stopPollingFn: startPolling(backend),
+        poller: new BackendPoller(backend),
       };
     },
     onUpdate(result) {
       const backend = result.value as BackendConfigValue;
       const prior = backendPolls.current[backend.id];
       if (!prior) {
-        // polling never set up before (unexpected on update)
         console.warn(`Polling not set up for backend ${backend.id}`);
         backendPolls.current[backend.id] = {
           url: backend.url,
           authToken: backend.authToken ?? null,
-          stopPollingFn: startPolling(backend),
+          poller: new BackendPoller(backend),
         };
       } else if (backend.url !== prior.url || backend.authToken !== prior.authToken) {
-        // url or auth token changed — restart polling
-        prior.stopPollingFn();
+        prior.poller.stop();
         backendPolls.current[backend.id] = {
           url: backend.url,
           authToken: backend.authToken ?? null,
-          stopPollingFn: startPolling(backend),
+          poller: new BackendPoller(backend),
         };
-      } else {
-        // something like name changed, we don't need to do anything
       }
     },
     onExit(result) {
       const backend = result.value as BackendConfigValue;
       if (backendPolls.current[backend.id]) {
-        backendPolls.current[backend.id].stopPollingFn();
+        backendPolls.current[backend.id].poller.stop();
         delete backendPolls.current[backend.id];
       }
     },
   });
+
+  createEffect({
+    query(q) {
+      return q.from({ pings: collections.pings });
+    },
+    skipInitial: false,
+    onEnter(result) {
+      const ping = result.value;
+      const backendUrl = ping.url;
+
+      const connection = collections.backendConnections.findOne(backendUrl);
+      const currentStatus = connection?.status || 'offline';
+
+      updateConnection(backendUrl, {
+        url: backendUrl,
+        status: currentStatus === 'connected' ? 'reconnecting' : 'reconnecting',
+        instanceId: connection?.instanceId || null,
+        latencyMs: null,
+        error: null,
+      });
+
+      const pollerEntry = Object.values(backendPolls.current).find(
+        (entry) => entry.url === backendUrl
+      );
+      if (pollerEntry) {
+        pollerEntry.poller.ping();
+      }
+
+      try {
+        collections.pings.delete(backendUrl);
+      } catch {}
+    },
+    onUpdate(result) {
+      const ping = result.value;
+      const backendUrl = ping.url;
+
+      const connection = collections.backendConnections.findOne(backendUrl);
+      const currentStatus = connection?.status || 'offline';
+
+      updateConnection(backendUrl, {
+        url: backendUrl,
+        status: currentStatus === 'connected' ? 'reconnecting' : 'reconnecting',
+        instanceId: connection?.instanceId || null,
+        latencyMs: null,
+        error: null,
+      });
+
+      const pollerEntry = Object.values(backendPolls.current).find(
+        (entry) => entry.url === backendUrl
+      );
+      if (pollerEntry) {
+        pollerEntry.poller.ping();
+      }
+
+      try {
+        collections.pings.delete(backendUrl);
+      } catch {}
+    },
+    onExit(result) {},
+  });
+}
+
+export function useInsertPing() {
+  const insertPing = useCallback((backendUrl: string) => {
+    collections.pings.insert({
+      url: backendUrl,
+      createdAt: Date.now(),
+    });
+  }, []);
+
+  return { insertPing };
 }
 
 /**
@@ -116,135 +313,6 @@ function updateConnection(url: string, value: BackendConnectionValue | null) {
 
 function authHeaders(authToken?: string): Record<string, string> {
   return authToken ? { Authorization: `Bearer ${authToken}` } : {};
-}
-
-/**
- * Start polling a backend's /health endpoint. Returns a teardown function
- * that cancels polling and closes all streams.
- */
-function startPolling(backend: BackendConfigValue): () => void {
-  let instanceId: string | null = null;
-  let stateStream: StreamHandle | null = null;
-  let ephemeralStream: StreamHandle | null = null;
-  let appStream: StreamHandle | null = null;
-  let cancelled = false;
-
-  const cleanBaseUrl = backend.url.replace(/\/$/, '');
-
-  /** Attach a stream, logging errors instead of throwing. */
-  function attachStream(
-    pathSuffix: string,
-    collectionNames: readonly string[]
-  ): StreamHandle | null {
-    try {
-      const s = appendStreamToDb(collectionEntries, {
-        streamOptions: {
-          url: `${cleanBaseUrl}${pathSuffix}`,
-          headers: authHeaders(backend.authToken),
-        },
-        collectionNames: [...collectionNames],
-        backendUrl: backend.url,
-      });
-      console.log(`[poll] Preload starting: ${pathSuffix}`, backend.url);
-      s.preload().then(
-        () => console.log(`[poll] Preload completed: ${pathSuffix}`, backend.url),
-        (err) => console.error(`[poll] Preload failed: ${pathSuffix}`, backend.url, err)
-      );
-      return s;
-    } catch (err) {
-      console.error(
-        `[useBackendManager] Failed to attach stream ${pathSuffix} for ${backend.url}:`,
-        err
-      );
-      return null;
-    }
-  }
-
-  async function poll() {
-    if (cancelled) return;
-
-    const start = Date.now();
-
-    try {
-      const res = await fetch(cleanBaseUrl + '/health', {
-        headers: authHeaders(backend.authToken),
-      });
-
-      if (cancelled) return;
-
-      if (!res.ok) {
-        updateConnection(backend.url, {
-          url: backend.url,
-          status: 'error',
-          instanceId,
-          latencyMs: null,
-          error: `HTTP ${res.status}`,
-        });
-        return;
-      }
-
-      const latency = Date.now() - start;
-
-      // Server is reachable — mark connected immediately
-      updateConnection(backend.url, {
-        url: backend.url,
-        status: 'connected',
-        instanceId,
-        latencyMs: latency,
-        error: null,
-      });
-
-      const data = await res.json();
-      const newInstanceId = data.instanceId as string | undefined;
-
-      console.log('[poll]', {
-        newInstanceId,
-        currentInstanceId: instanceId,
-        willAttachStreams: !!(newInstanceId && newInstanceId !== instanceId),
-      });
-
-      // Detect instanceId change (server restart)
-      if (newInstanceId && newInstanceId !== instanceId) {
-        // Close old instance-scoped streams (state + ephemeral)
-        closeStreamSafe(stateStream);
-        closeStreamSafe(ephemeralStream);
-        stateStream = null;
-        ephemeralStream = null;
-
-        instanceId = newInstanceId;
-
-        stateStream = attachStream(`/${newInstanceId}`, STATE_STREAM_COLLECTIONS);
-
-        ephemeralStream = attachStream(`/${newInstanceId}/ephemeral`, EPHEMERAL_STREAM_COLLECTIONS);
-
-        // Attach app stream only once — survives instanceId changes
-        if (!appStream) {
-          appStream = attachStream('/app', APP_STREAM_COLLECTIONS);
-        }
-      }
-    } catch (err: any) {
-      if (cancelled) return;
-
-      updateConnection(backend.url, {
-        url: backend.url,
-        status: 'error',
-        instanceId,
-        latencyMs: null,
-        error: err.message || 'Connection failed',
-      });
-    }
-  }
-
-  poll();
-  const intervalId = setInterval(poll, POLL_INTERVAL);
-
-  return () => {
-    cancelled = true;
-    clearInterval(intervalId);
-    closeStreamSafe(stateStream);
-    closeStreamSafe(ephemeralStream);
-    closeStreamSafe(appStream);
-  };
 }
 
 function closeStreamSafe(handle: StreamHandle | null) {

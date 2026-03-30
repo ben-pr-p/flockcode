@@ -17,6 +17,7 @@ export type {
   SessionMetaValue,
   BackendConfigValue,
   BackendConnectionValue,
+  PingValue,
   UIMessage,
   ToolMeta,
 };
@@ -141,6 +142,13 @@ type BackendConnectionValue = {
   error: string | null;
 };
 
+type PingValue = {
+  /** The backend URL — primary key */
+  url: string;
+  /** Timestamp when the ping was created (used for UI cleanup) */
+  createdAt: number;
+};
+
 // ---------------------------------------------------------------------------
 // Collection definitions — server-synced
 // ---------------------------------------------------------------------------
@@ -216,6 +224,11 @@ const localDef = {
     type: 'backendConnection' as const,
     primaryKey: 'url' as const,
   },
+  pings: {
+    schema: passthrough<PingValue>(),
+    type: 'ping' as const,
+    primaryKey: 'url' as const,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -248,6 +261,7 @@ const globalStateDef = {
   // Local-only
   backends: localDef.backends,
   backendConnections: localDef.backendConnections,
+  pings: localDef.pings,
 };
 
 type GlobalStateDef = typeof globalStateDef;
