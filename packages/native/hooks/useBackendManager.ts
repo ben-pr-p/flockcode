@@ -1,6 +1,5 @@
-import { useRef } from 'react';
-import { useCallback } from 'react';
-import { createEffect, useLiveQuery, eq } from '@tanstack/react-db';
+import { useRef, useCallback } from 'react';
+import { createEffect, eq } from '@tanstack/react-db';
 import { appendStreamToDb, type StreamHandle } from '../lib/durable-streams';
 import { collections, collectionEntries } from '../lib/collections';
 import {
