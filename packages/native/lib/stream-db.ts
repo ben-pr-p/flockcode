@@ -18,6 +18,7 @@ export type {
   BackendConfigValue,
   BackendConnectionValue,
   PingValue,
+  StreamOffsetValue,
   UIMessage,
   ToolMeta,
 };
@@ -149,6 +150,14 @@ type PingValue = {
   createdAt: number;
 };
 
+/** Persisted stream offset for resuming a durable stream from where we left off. */
+type StreamOffsetValue = {
+  /** The full stream URL — primary key */
+  url: string;
+  /** Opaque offset string from the durable streams protocol */
+  offset: string;
+};
+
 // ---------------------------------------------------------------------------
 // Collection definitions — server-synced
 // ---------------------------------------------------------------------------
@@ -229,6 +238,11 @@ const localDef = {
     type: 'ping' as const,
     primaryKey: 'url' as const,
   },
+  streamOffsets: {
+    schema: passthrough<StreamOffsetValue>(),
+    type: 'streamOffset' as const,
+    primaryKey: 'url' as const,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -262,6 +276,7 @@ const globalStateDef = {
   backends: localDef.backends,
   backendConnections: localDef.backendConnections,
   pings: localDef.pings,
+  streamOffsets: localDef.streamOffsets,
 };
 
 type GlobalStateDef = typeof globalStateDef;
@@ -276,6 +291,7 @@ const PERSISTED_COLLECTION_NAMES = new Set([
   'messages',
   'sessionMeta',
   'backends', // local-only but persisted (user config)
+  'streamOffsets', // local-only but persisted (resume offsets)
 ]);
 
 /**

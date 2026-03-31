@@ -17,6 +17,10 @@ function rewriteToDs(prefix: string, ds: DurableStreamServer) {
   return (c: Context) => {
     const url = new URL(c.req.url)
     url.pathname = url.pathname.slice(prefix.length) || "/"
+    const offset = url.searchParams.get("offset")
+    if (offset && offset !== "-1") {
+      console.log(`[stream-offset] Resuming from offset ${offset} for ${prefix}`)
+    }
     return ds.fetch(new Request(url.toString(), c.req.raw))
   }
 }
