@@ -8,6 +8,7 @@ import {
   APP_STREAM_COLLECTIONS,
   type BackendConfigValue,
   type BackendConnectionValue,
+  type StreamOffsetValue,
 } from '../lib/stream-db';
 
 const POLL_INTERVAL = 5_000;
@@ -39,18 +40,46 @@ class BackendPoller {
     this.start();
   }
 
-  private attachStream(
+  private async attachStream(
     pathSuffix: string,
     collectionNames: readonly string[]
-  ): StreamHandle | null {
+  ): Promise<StreamHandle | null> {
     try {
+      const streamUrl = `${this.cleanBaseUrl}${pathSuffix}`;
+
+      // Ensure SQLite hydration is complete before reading persisted offsets
+      await collections.streamOffsets.preload();
+
+      // Read persisted offset so we can resume where we left off
+      const savedOffset = collections.streamOffsets.get(streamUrl) as
+        | StreamOffsetValue
+        | undefined;
+
+      if (savedOffset) {
+        console.log(`[stream-offset] Resuming from offset ${savedOffset.offset} for ${streamUrl}`);
+      } else {
+        console.log(`[stream-offset] No saved offset for ${streamUrl}, starting from beginning`);
+      }
+
       const s = appendStreamToDb(collectionEntries, {
         streamOptions: {
-          url: `${this.cleanBaseUrl}${pathSuffix}`,
+          url: streamUrl,
           headers: authHeaders(this.backend.authToken),
         },
         collectionNames: [...collectionNames],
         backendUrl: this.backend.url,
+        initialOffset: savedOffset?.offset,
+        onOffset: (offset) => {
+          // Persist the latest offset so we can resume on next app launch
+          try {
+            collections.streamOffsets.update(streamUrl, (draft) => {
+              draft.offset = offset;
+            });
+          } catch {
+            // Row doesn't exist yet — insert it
+            collections.streamOffsets.insert({ url: streamUrl, offset });
+          }
+        },
       });
       console.log(`[poll] Preload starting: ${pathSuffix}`, this.backend.url);
       s.preload().then(
@@ -112,19 +141,28 @@ class BackendPoller {
       if (newInstanceId && newInstanceId !== this.instanceId) {
         closeStreamSafe(this.stateStream);
         closeStreamSafe(this.ephemeralStream);
+
+        // Clean up persisted offsets for the old instance-scoped stream URLs
+        if (this.instanceId) {
+          const oldStateUrl = `${this.cleanBaseUrl}/${this.instanceId}`;
+          const oldEphemeralUrl = `${this.cleanBaseUrl}/${this.instanceId}/ephemeral`;
+          deleteStreamOffsetSafe(oldStateUrl);
+          deleteStreamOffsetSafe(oldEphemeralUrl);
+        }
+
         this.stateStream = null;
         this.ephemeralStream = null;
 
         this.instanceId = newInstanceId;
 
-        this.stateStream = this.attachStream(`/${newInstanceId}`, STATE_STREAM_COLLECTIONS);
-        this.ephemeralStream = this.attachStream(
+        this.stateStream = await this.attachStream(`/${newInstanceId}`, STATE_STREAM_COLLECTIONS);
+        this.ephemeralStream = await this.attachStream(
           `/${newInstanceId}/ephemeral`,
           EPHEMERAL_STREAM_COLLECTIONS
         );
 
         if (!this.appStream) {
-          this.appStream = this.attachStream('/app', APP_STREAM_COLLECTIONS);
+          this.appStream = await this.attachStream('/app', APP_STREAM_COLLECTIONS);
         }
       }
     } catch (err: any) {
@@ -323,5 +361,13 @@ function closeStreamSafe(handle: StreamHandle | null) {
     handle.close();
   } catch {
     /* ignore */
+  }
+}
+
+function deleteStreamOffsetSafe(url: string) {
+  try {
+    collections.streamOffsets.delete(url);
+  } catch {
+    /* ignore if not found */
   }
 }

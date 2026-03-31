@@ -993,6 +993,17 @@ export interface AppendStreamOptions {
    * This lets queries join/filter by backend without the server knowing its own URL.
    */
   backendUrl?: string;
+  // [FLOCKCODE] Offset persistence — resume streams from where we left off
+  /**
+   * Initial offset to resume the stream from. If omitted, defaults to "-1"
+   * (beginning of stream).
+   */
+  initialOffset?: string;
+  /**
+   * Called after each batch with the latest offset. Use this to persist the
+   * offset so the stream can be resumed on next app launch.
+   */
+  onOffset?: (offset: string) => void;
 }
 
 /**
@@ -1015,7 +1026,7 @@ export function appendStreamToDb(
   entries: Record<string, CollectionEntry>,
   options: AppendStreamOptions
 ): StreamHandle {
-  const { streamOptions, collectionNames, backendUrl } = options;
+  const { streamOptions, collectionNames, backendUrl, initialOffset, onOffset } = options;
 
   // Create a stream handle (lightweight, doesn't connect until stream() is called)
   const stream = new DurableStreamClass(streamOptions);
@@ -1079,9 +1090,13 @@ export function appendStreamToDb(
     if (consumerStarted) return;
     consumerStarted = true;
 
+    const streamOffset = initialOffset || '-1';
+    console.log(`[stream-offset] Connecting to stream with offset ${streamOffset} (url: ${streamOptions.url})`);
+
     streamResponse = await stream.stream<StateEvent>({
       live: true,
       signal: abortController.signal,
+      ...(initialOffset ? { offset: initialOffset } : {}),
     });
 
     let batchCount = 0;
@@ -1100,6 +1115,11 @@ export function appendStreamToDb(
 
         if (batch.upToDate) {
           dispatcher.markUpToDate();
+        }
+
+        // Persist the latest offset after every batch so we can resume here
+        if (onOffset && batch.offset) {
+          onOffset(batch.offset);
         }
       } catch (error) {
         console.error(`[StreamDB] Error processing batch:`, error);

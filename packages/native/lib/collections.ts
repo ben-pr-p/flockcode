@@ -33,6 +33,7 @@ import type {
   BackendConfigValue,
   BackendConnectionValue,
   PingValue,
+  StreamOffsetValue,
 } from './stream-db';
 import type { Message } from '../../server/src/types';
 
@@ -219,6 +220,12 @@ const _pings = createLocalEphemeralCollection<PingValue>(
   (item) => item.url
 );
 
+const _streamOffsets = createLocalPersistedCollection<StreamOffsetValue>(
+  'streamOffsets',
+  globalStateDef.streamOffsets,
+  (item) => item.url
+);
+
 // ---------------------------------------------------------------------------
 // Exported collections object — import this in components and hooks
 // ---------------------------------------------------------------------------
@@ -244,6 +251,7 @@ export const collections = {
   backends: _backends.collection,
   backendConnections: _backendConnections.collection,
   pings: _pings.collection,
+  streamOffsets: _streamOffsets.collection,
 };
 
 // ---------------------------------------------------------------------------
@@ -264,6 +272,7 @@ export const collectionEntries = {
   backends: _backends,
   backendConnections: _backendConnections,
   pings: _pings,
+  streamOffsets: _streamOffsets,
 };
 
 export { STATE_STREAM_COLLECTIONS, EPHEMERAL_STREAM_COLLECTIONS, APP_STREAM_COLLECTIONS };
