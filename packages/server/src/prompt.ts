@@ -51,11 +51,11 @@ export async function sendPrompt(
 
           // Prepend per-chunk line reference if the audio part carries one
           if (p.lineReference) {
-            const range = p.lineReference.startLine === p.lineReference.endLine
-              ? `line ${p.lineReference.startLine}`
-              : `lines ${p.lineReference.startLine}-${p.lineReference.endLine}`
-            const side = p.lineReference.side ? ` (${p.lineReference.side} side)` : ""
-            text = `[Referencing ${range} of ${p.lineReference.file}${side}]\n${text}`
+            const lines = p.lineReference.startLine === p.lineReference.endLine
+              ? `${p.lineReference.startLine}`
+              : `${p.lineReference.startLine}-${p.lineReference.endLine}`
+            const sideAttr = p.lineReference.side ? ` side="${p.lineReference.side}"` : ""
+            text = `<reference lines="${lines}" file="${p.lineReference.file}"${sideAttr}>\n${text}\n</reference>`
           }
 
           return { type: "text" as const, text }
@@ -70,12 +70,13 @@ export async function sendPrompt(
 
   // Prepend line reference context if the user selected lines in the diff viewer
   if (lineReference && textParts.length > 0) {
-    const lineRange = lineReference.startLine === lineReference.endLine
-      ? `line ${lineReference.startLine}`
-      : `lines ${lineReference.startLine}-${lineReference.endLine}`
-    const sideQualifier = lineReference.side ? ` (${lineReference.side} side)` : ""
-    const prefix = `[The user is referencing ${lineRange} of ${lineReference.file}${sideQualifier}]\n\n`
-    textParts[0] = { type: "text", text: prefix + textParts[0].text }
+    const lines = lineReference.startLine === lineReference.endLine
+      ? `${lineReference.startLine}`
+      : `${lineReference.startLine}-${lineReference.endLine}`
+    const sideAttr = lineReference.side ? ` side="${lineReference.side}"` : ""
+    const prefix = `<reference lines="${lines}" file="${lineReference.file}"${sideAttr}>\n`
+    const suffix = `\n</reference>`
+    textParts[0] = { type: "text", text: prefix + textParts[0].text + suffix }
   }
 
   const resolvedText = textParts.map((p) => p.text.slice(0, 100)).join(" | ")
